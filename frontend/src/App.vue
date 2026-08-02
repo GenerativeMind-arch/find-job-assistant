@@ -58,6 +58,7 @@
         :render-config="renderConfig"
         :interview-qa="interviewQa"
         :triggered-agents="triggeredAgents"
+        @imported="handleBossImported"
       />
     </div>
   </div>
@@ -177,6 +178,16 @@ function applyResponse(data) {
   if (data.resume_html) resumeHtml.value = data.resume_html
   if (data.interview_qa) interviewQa.value = data.interview_qa
   if (data.triggered_agents) triggeredAgents.value = data.triggered_agents
+}
+
+/** Boss 岗位导入工作流后：切换对话面板、写入 job、自动触发分析流水线。 */
+function handleBossImported({ sessionId: bossSessionId, job: bossJob, message }) {
+  sessionId.value = bossSessionId || sessionId.value
+  if (bossJob) job.value = bossJob
+  activePanel.value = 'chat'
+  if (message) addMessage('assistant', message)
+  // 自动发送触发指令，走 import_boss_job 全链路（jd 已预置解析）
+  handleSend('分析这个岗位')
 }
 </script>
 

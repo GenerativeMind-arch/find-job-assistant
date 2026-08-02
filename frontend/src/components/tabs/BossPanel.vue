@@ -78,6 +78,9 @@
               {{ job.status === 'pending' ? '投递' : job.status === 'greeting_sent' ? '已沟通' : job.status }}
             </button>
             <button class="btn btn-sm btn-secondary" @click="analyzeJob(job)">AI分析</button>
+            <button class="btn btn-sm btn-accent" @click="importJobToWorkflow(job)" :disabled="loading">
+              导入岗位
+            </button>
           </div>
         </div>
       </div>
@@ -170,7 +173,13 @@ import {
   bossPauseMonitor, bossResumeMonitor,
   bossSearchJobs, bossListJobs, bossApply, bossScanAndApply, bossScanPage, bossAnalyze,
   bossConversations, bossStats, bossGetSettings, bossUpdateSettings,
+  bossImportJob,
 } from '../../api/index.js'
+
+const props = defineProps({
+  sessionId: { type: String, default: '' },
+})
+const emit = defineEmits(['imported'])
 
 const loading = ref(false)
 const status = ref({})
@@ -289,6 +298,24 @@ async function analyzeJob(job) {
   finally { loading.value = false }
 }
 
+/** 将岗位导入主工作流（CopilotState.job），随后自动切换到对话区触发分析。 */
+async function importJobToWorkflow(job) {
+  if (!job.job_url) {
+    alert('该岗位缺少 URL，无法导入')
+    return
+  }
+  loading.value = true
+  try {
+    const { data } = await bossImportJob(job.job_url, props.sessionId)
+    emit('imported', { sessionId: data.session_id, job: data.job, message: data.message })
+    // 由 App.vue 处理：切换到对话区并自动发送"分析这个岗位"
+  } catch (e) {
+    alert('导入失败: ' + (e.response?.data?.detail || e.message))
+  } finally {
+    loading.value = false
+  }
+}
+
 async function loadConversations() {
   try {
     const { data } = await bossConversations()
@@ -380,6 +407,8 @@ onUnmounted(() => {
 .btn-warning:hover:not(:disabled) { filter: brightness(1.1); }
 .btn-danger { background: #ef4444; color: #fff; }
 .btn-danger:hover:not(:disabled) { filter: brightness(1.1); }
+.btn-accent { background: #8b5cf6; color: #fff; }
+.btn-accent:hover:not(:disabled) { filter: brightness(1.1); }
 
 .sub-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); overflow-x: auto; }
 .sub-tab {

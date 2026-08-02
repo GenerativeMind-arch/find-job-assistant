@@ -206,6 +206,70 @@ class SettingsUpdate(BaseModel):
     default_city: Optional[str] = None
 
 
+class ImportJobRequest(BaseModel):
+    """导入 Boss 岗位到主工作流。"""
+    job_url: Optional[str] = None
+    job_id: Optional[int] = None
+    session_id: Optional[str] = ""
+
+
+class AgentRunRequest(BaseModel):
+    """运行 Plan-then-Execute Agent（可选高级功能）。"""
+    goal: str
+    max_steps: Optional[int] = 12
+    auto_execute: Optional[bool] = True
+
+
+# ══════════════════════════════════════
+#  Agent Harness（ToolRegistry + AgentLoop）
+# ══════════════════════════════════════
+
+_agent_registry = None
+
+
+def _get_agent_registry():
+    """惰性初始化 ToolRegistry（14 原子工具 + 3 复合技能）。"""
+    global _agent_registry
+    if _agent_registry is None:
+        from boss.agent import ToolRegistry, register_all
+        _agent_registry = ToolRegistry()
+        register_all(_agent_registry)
+    return _agent_registry
+
+
+def _convert_boss_job_to_copilot_job(record: dict) -> dict:
+    """将 boss_state 的岗位记录转换为 CopilotState.Job 结构。
+
+    id 以 boss_ 开头（供 planner 启发式识别），parsed_at 标记为已解析，
+    source 填入完整 JD 正文，供下游 gap/content agent 使用。
+    """
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    title = record.get("job_title") or record.get("title") or ""
+    company = record.get("company") or ""
+    description = record.get("description") or ""
+    source = description or title
+    if company and description:
+        source = f"公司：{company}\n职位：{title}\n\n{description}"
+    return {
+        "id": f"boss_{record.get('id', '')}",
+        "source": source,
+        "parsed_at": now,
+        "version": 1,
+        "industry": record.get("industry", ""),
+        "title": title,
+        "tech_stack": [],
+        "keywords": [],
+        "hard_skills": [],
+        "soft_skills": [],
+        "responsibilities": [],
+        "education_requirement": record.get("education", ""),
+        "experience_requirement": record.get("experience", ""),
+        "implicit_preferences": [],
+        "bonus_items": [],
+    }
+
+
 # ══════════════════════════════════════
 #  系统控制
 # ══════════════════════════════════════
@@ -682,3 +746,126 @@ def boss_transfer_requests():
 @router.get("/geo/cities")
 def boss_geo_cities():
     return {"cities": [{"name": k, "code": v} for k, v in CITY_MAP.items()]}
+
+
+# ══════════════════════════════════════
+#  Agent Harness（可选高级功能）
+# ══════════════════════════════════════
+
+@router.get("/agent/tools")
+def boss_agent_tools():
+    """返回 Agent 可用的工具列表（文本描述 + OpenAI function schema）。
+
+    定位：这是"AI 自动求职"高级能力的工具清单，手动操作为默认。
+    """
+    registry = _get_agent_registry()
+    return {
+        "count": len(registry.get_names()),
+        "names": registry.get_names(),
+        "tools": registry.get_text_description(),
+        "openai_schema": registry.get_openai_schema(),
+    }
+
+
+@router.post("/agent/run")
+async def boss_agent_run(req: AgentRunRequest):
+    """运行 Plan-then-Execute Agent，自主执行求职任务（可选高级功能）。
+
+    四阶段：规划 → 执行 → 重规划(仅失败时) → 总结。
+    通过 WebSocket 事件广播 plan / step / complete 进展。
+    """
+    from boss.agent import AgentLoop
+    from boss.manager import _BOSS_DIR
+
+    if not req.goal or not req.goal.strip():
+        raise HTTPException(status_code=400, detail="缺少 goal 参数")
+
+    registry = _get_agent_registry()
+    manager = _get_manager()
+
+    # LLM 函数（复用面试助手 config_loader 配置）
+    sys.path.insert(0, str(_BOSS_DIR / "interview"))
+    from llm_client import llm_chat_deepseek
+
+    # WebSocket 事件回调
+    async def _on_plan(plan: dict):
+        await manager._broadcast({"type": "agent_plan", "plan": plan})
+
+    async def _on_step(step: dict):
+        await manager._broadcast({"type": "agent_step", "step": step})
+
+    loop = AgentLoop(
+        registry=registry,
+        llm_chat=llm_chat_deepseek,
+        goal=req.goal,
+        max_steps=req.max_steps or 12,
+        on_plan=_on_plan,
+        on_step=_on_step,
+    )
+
+    try:
+        result = await loop.run()
+    except Exception as e:
+        import logging
+        logging.getLogger("api").error("Agent run failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Agent 执行失败: {e}")
+
+    # 广播完成事件（detail 较大，只广播摘要）
+    summary_event = {k: v for k, v in result.items() if k != "detail"}
+    await manager._broadcast({"type": "agent_complete", "result": summary_event})
+
+    return result
+
+
+# ══════════════════════════════════════
+#  工作流桥接：Boss 岗位 → 主流水线
+# ══════════════════════════════════════
+
+@router.post("/import-job")
+async def boss_import_job(req: ImportJobRequest):
+    """将 Boss 直聘搜索到的岗位导入主工作流（CopilotState.job）。
+
+    导入后，岗位已预置解析（parsed_at 已设置、id 以 boss_ 开头），
+    用户在对话区输入"分析这个岗位"即可触发 jd→差距→简历→面试全链路
+    （planner 启发式识别 boss_ 前缀，跳过 jd_agent 重新解析）。
+    """
+    import uuid as _uuid
+
+    from workflow.state import CopilotState, Job
+    from storage.redis_client import get_redis_client, RedisSessionStore
+
+    # 1. 从 boss SQLite 获取岗位记录
+    record = None
+    if req.job_url:
+        record = get_application_by_url(_normalize_job_url(req.job_url))
+    elif req.job_id is not None:
+        record = get_application(req.job_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="岗位不存在，请先在 Boss 面板搜索")
+
+    # 2. 转换为 CopilotState.Job（标记为已解析）
+    job = Job(**_convert_boss_job_to_copilot_job(record))
+
+    # 3. 加载或创建会话状态并写入 Redis
+    session_id = req.session_id or f"sess_{_uuid.uuid4().hex[:16]}"
+    redis_client = await get_redis_client()
+    store = RedisSessionStore(session_id, redis_client)
+    saved_state = await store.load_state()
+    if saved_state:
+        state = CopilotState.model_validate(saved_state)
+        state.job = job
+    else:
+        state = CopilotState(session_id=session_id, job=job)
+
+    persist_data = state.model_dump(exclude={
+        "user_message", "user_attachments", "current_intent",
+        "execution_plan", "reply_message", "triggered_agents", "workflow_trace",
+    })
+    await store.save_state(persist_data)
+
+    return {
+        "session_id": session_id,
+        "job": job.model_dump(),
+        "status": "imported",
+        "message": f"已导入岗位「{job.title}」到工作流会话 {session_id}。请在对话区输入「分析这个岗位」开始分析。",
+    }

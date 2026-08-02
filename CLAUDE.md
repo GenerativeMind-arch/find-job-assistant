@@ -418,5 +418,71 @@ interview-assistant/
 
 ---
 
+## 7. Boss 直聘集成（v2.0 新增）
+
+Boss 相关能力集成自 `boss_ai_reference/boos-ai` 项目，包含自动搜索、筛选、投递、聊天管理与反爬机制。**核心原则：手动操作为默认，Agent 自动执行为可选高级功能。**
+
+### 7.1 模块结构
+
+```
+backend/
+├── boss/                        # Boss 直聘自动化（Playwright + Firefox）
+│   ├── boss_firefox.py          #   搜索 + 详情 XHR + ANTI_DETECT 反检测 JS
+│   ├── boss_automation.py       #   投递（注入 JS + Playwright 混合）+ 聊天 + 风控退避
+│   ├── boss_state.py            #   SQLite 持久化（applications/conversations/messages/...）
+│   ├── boss_replier.py          #   AI 招呼语 + 回复生成
+│   ├── boss_company.py          #   公司画像聚合 + 法人识别
+│   ├── boss_geo.py              #   城市/区编码映射
+│   ├── boss_rag.py              #   历史 JD RAG 检索
+│   ├── manager.py               #   BossManager 单例（Playwright 单线程 + 监控循环）
+│   └── agent/                   #   ★ Harness 层（Plan-then-Execute）
+│       ├── tools.py             #     ToolRegistry + 14 原子工具 + ToolContext
+│       ├── skills.py            #     3 复合技能（smart_scan / prepare_application / smart_apply）
+│       ├── loop.py              #     AgentLoop 主循环（规划→执行→重规划→总结）
+│       └── prompts.py           #     规划/重规划/总结 Prompt
+├── api/boss.py                  # /api/boss/* 路由（含 agent/tools、agent/run、import-job）
+└── cli/                         # CLI 命令行工具（python -m cli.cli）
+```
+
+### 7.2 Agent Harness（可选高级功能）
+
+- **ToolRegistry**：17 个工具（14 原子 + 3 复合技能），通过 `GET /api/boss/agent/tools` 查看
+- **AgentLoop**：四阶段 Plan-then-Execute（规划→执行→重规划→总结），通过 `POST /api/boss/agent/run` 触发
+- **ToolContext** 与 `BossManager` 单例绑定：automation 动态读取当前浏览器实例，run_pw 委托 Playwright 专属线程
+- **风控约束**：AgentLoop 内置"不投递"约束检查、步间随机延迟（2-6s）、错误退避（5-45s）、冷却感知
+
+### 7.3 Boss → 主工作流桥接
+
+`POST /api/boss/import-job` 将 Boss 搜索到的岗位导入 `CopilotState.job`（id 以 `boss_` 开头、parsed_at 已设置），随后对话区输入"分析这个岗位"触发全链路：
+
+```
+Boss 搜索 → 点击"导入岗位" → import-job 写入 Redis state
+    → 前端切换对话区 + 自动发送"分析这个岗位"
+    → Planner 启发式识别 boss_ 前缀 → import_boss_job 意图
+    → gap_agent → content_agent → render_agent → interview_agent（跳过 jd_agent，job 已预置解析）
+```
+
+### 7.4 反爬机制（已完整迁移）
+
+- `ANTI_DETECT` JS 注入：隐藏 webdriver、canvas/WebGL 指纹干扰、时区/语言/硬件伪装
+- `window.__bossApply` 注入 JS：原生 DOM 点击 + 逐字输入，绕过 CDP 检测
+- 人类行为模拟：`_human_type` / `_human_scroll` / `_human_pace`
+- 指数退避冷却：rate_limit=120s / captcha=600s / banned=3600s，翻倍封顶 2h
+
+### 7.5 CLI
+
+```bash
+cd backend && python -m cli.cli --help
+python -m cli.cli status                          # 系统状态
+python -m cli.cli search "Python" --city 广州      # 搜索岗位
+python -m cli.cli scan-apply                        # 扫描+投递
+python -m cli.cli agent-run "搜索广州Python岗位，只搜不投"  # Agent 自动执行
+python -m cli.cli import-job <job_url>              # 导入岗位到主工作流
+```
+
+后端地址通过环境变量 `INTERVIEW_BOSS_API` 覆盖（默认 `http://127.0.0.1:8000`）。所有命令 stdout 输出统一 JSON 信封。
+
+---
+
 **在线演示**: http://8.153.79.69:3001  
 **GitHub**: https://github.com/Programmergyt/interview-assistant

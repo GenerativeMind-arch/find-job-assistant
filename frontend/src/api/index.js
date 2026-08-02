@@ -173,3 +173,18 @@ export function bossUpdateSettings(updates) {
 export function bossShortlists() {
   return bossApi.get('/shortlists')
 }
+
+/** POST /api/boss/import-job — 将 Boss 岗位导入主工作流 */
+export function bossImportJob(jobUrl, sessionId = '') {
+  return bossApi.post('/import-job', { job_url: jobUrl, session_id: sessionId })
+}
+
+/** GET /api/boss/agent/tools — Agent 工具列表 */
+export function bossAgentTools() {
+  return bossApi.get('/agent/tools')
+}
+
+/** POST /api/boss/agent/run — 运行 Plan-then-Execute Agent */
+export function bossAgentRun(goal, maxSteps = 12) {
+  return bossApi.post('/agent/run', { goal, max_steps: maxSteps })
+}

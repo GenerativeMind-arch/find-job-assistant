@@ -1,0 +1,81 @@
+[
+  {
+    "name": "boss_search",
+    "description": "在BOSS直聘搜索岗位，返回岗位列表（含公司/薪资/城市/经验/学历/HR活跃度）",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "keyword": {"type": "string", "description": "搜索关键词"},
+        "city": {"type": "string", "description": "城市名，默认全国"},
+        "limit": {"type": "integer", "description": "返回数量上限"}
+      },
+      "required": ["keyword"]
+    }
+  },
+  {
+    "name": "boss_status",
+    "description": "获取BOSS系统状态：浏览器是否运行、今日投递数、日上限",
+    "parameters": {"type": "object", "properties": {}, "required": []}
+  },
+  {
+    "name": "boss_stats",
+    "description": "获取投递转化漏斗统计",
+    "parameters": {"type": "object", "properties": {}, "required": []}
+  },
+  {
+    "name": "boss_apply",
+    "description": "投递单个BOSS岗位（含AI招呼语），消耗每日配额",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "job_url": {"type": "string", "description": "岗位URL"}
+      },
+      "required": ["job_url"]
+    }
+  },
+  {
+    "name": "boss_scan",
+    "description": "扫描当前BOSS搜索结果页，提取所有可见岗位",
+    "parameters": {"type": "object", "properties": {}, "required": []}
+  },
+  {
+    "name": "boss_conversations",
+    "description": "列出所有活跃HR会话",
+    "parameters": {"type": "object", "properties": {}, "required": []}
+  },
+  {
+    "name": "boss_analyze",
+    "description": "AI分析岗位JD匹配度，返回匹配分数/差距/建议",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "job_url": {"type": "string", "description": "岗位URL"}
+      },
+      "required": ["job_url"]
+    }
+  },
+  {
+    "name": "boss_agent_run",
+    "description": "运行Plan-then-Execute Agent自主执行求职任务（搜索→分析→可选投递）",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "goal": {"type": "string", "description": "自然语言求职目标"},
+        "max_steps": {"type": "integer", "description": "最大执行步数"}
+      },
+      "required": ["goal"]
+    }
+  },
+  {
+    "name": "boss_import_job",
+    "description": "将BOSS岗位导入主工作流（JD→差距→简历→面试流水线）",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "job_url": {"type": "string", "description": "岗位URL"},
+        "session_id": {"type": "string", "description": "目标会话ID"}
+      },
+      "required": ["job_url"]
+    }
+  }
+]

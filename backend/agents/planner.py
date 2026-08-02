@@ -27,6 +27,7 @@ _INTENT_PLAN: dict[str, list[str]] = {
     "upload_jd": ["jd_agent", "gap_agent", "content_agent", "render_agent", "interview_agent"],
     "upload_profile": ["profile_agent", "content_agent", "render_agent", "interview_agent"],
     "search_jd": [],                                    # 特殊处理：先搜索展示结果，用户选择后再执行 pipeline
+    "import_boss_job": ["gap_agent", "content_agent", "render_agent", "interview_agent"],  # Boss 导入岗位，job 已解析，跳过 jd_agent
     # 分析与生成类
     "gap_analysis": ["gap_agent"],
     "content_edit": ["content_agent", "render_agent"],
@@ -78,6 +79,26 @@ def _looks_like_job_title(text: str) -> bool:
     return any(kw in stripped for kw in _JOB_TITLE_KEYWORDS)
 
 
+# ── Boss 导入岗位流水线触发关键词 ────────────────────────
+_PIPELINE_TRIGGER_KEYWORDS = [
+    "分析", "生成", "开始", "处理", "继续", "准备", "导入", "简历", "面试",
+]
+
+
+def _is_pipeline_trigger(text: str) -> bool:
+    """Heuristic：短指令文本（如"分析这个岗位"、"生成简历"）→ 触发 Boss 导入岗位的全链路。
+
+    排除疑问句（用户可能只是在问信息），避免误触发昂贵的 LLM 全链路。
+    """
+    stripped = text.strip()
+    if not (2 <= len(stripped) <= 60):
+        return False
+    # 排除疑问句
+    if any(m in stripped for m in ("?", "？", "吗", "多少", "什么", "怎么", "谁", "哪")):
+        return False
+    return any(kw in stripped for kw in _PIPELINE_TRIGGER_KEYWORDS)
+
+
 def _force_search_jd_if_short_job_title(primary: str, state: CopilotState) -> str:
     """硬编码保护：当 LLM 把短职位名误判为 upload_jd/ask_question 时纠正。
 
@@ -103,6 +124,7 @@ def _build_execution_plan(intent: str, secondary: list[str], state: CopilotState
 
     动态调整逻辑：
     - search_jd：先搜索，用户选择后走 upload_jd pipeline
+    - import_boss_job：Boss 导入的岗位（job 已预置解析）→ 全链路（不含 jd_agent）
     - upload_jd 且无 profile：只跑 jd_agent（无法生成简历）
     - content_edit + render_edit 复合：一起排入 plan
     - search_knowledge：走 question_agent（带 RAG）
@@ -117,6 +139,13 @@ def _build_execution_plan(intent: str, secondary: list[str], state: CopilotState
     # ── search_knowledge ──
     if intent == "search_knowledge":
         return ["question_agent"]
+
+    # ── import_boss_job 条件分支 ──
+    if intent == "import_boss_job":
+        if state.candidate_profile is None:
+            # 缺少候选人画像：只有 gap_agent（内部会优雅跳过并提示）
+            return ["gap_agent"]
+        # 已有 job + profile → 全链路（不含 jd_agent，job 已由 import-job 预置解析）
 
     # ── upload_jd 条件分支 ──
     if intent == "upload_jd":
@@ -312,6 +341,22 @@ async def planner_node_async(state: CopilotState) -> dict[str, Any]:
     # ── 硬编码保护：短输入 + 像职位名 → 强制 search_jd ──
     # LLM 有时会把"Agent应用开发工程师"这种短职位名误判为 upload_jd 或 ask_question
     primary = _force_search_jd_if_short_job_title(primary, state)
+
+    # ── Boss 导入岗位启发式 ──
+    # 当 state.job 由 Boss 导入（id 以 boss_ 开头且已解析）且用户输入是
+    # 流水线触发指令（如"分析这个岗位"）时，强制走 import_boss_job 全链路，
+    # 避免 LLM 把这类短指令误判为 ask_question / gap_analysis 等只跑部分节点。
+    if (
+        state.job is not None
+        and state.job.id.startswith("boss_")
+        and state.job.parsed_at
+        and _is_pipeline_trigger(state.user_message)
+    ):
+        primary = "import_boss_job"
+        logger.info(
+            "Boss-imported job heuristic: forced intent=import_boss_job (msg=%s)",
+            state.user_message[:40],
+        )
 
     # ── search_jd 特殊处理：搜索 JD 并返回结果 ──
     if primary == "search_jd":

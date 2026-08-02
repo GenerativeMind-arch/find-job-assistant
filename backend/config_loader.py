@@ -275,3 +275,27 @@ def get_boss_config() -> dict:
         "greeting_mode": cfg.get("greeting_mode", "template"),
         "default_city": cfg.get("default_city", "全国"),
     }
+
+
+def get_boss_agent_config() -> dict:
+    """返回 BOSS Agent（Plan-then-Execute Harness）配置。"""
+    cfg = get_config().get("boss", {}).get("agent", {})
+    return {
+        "enabled": cfg.get("enabled", True),
+        "max_steps": cfg.get("max_steps", 12),
+        "max_replans": cfg.get("max_replans", 2),
+        "auto_execute": cfg.get("auto_execute", True),
+        "inter_step_delay_min": cfg.get("inter_step_delay_min", 2.0),
+        "inter_step_delay_max": cfg.get("inter_step_delay_max", 6.0),
+        "smart_scan_top_n": cfg.get("smart_scan_top_n", 5),
+        "smart_apply_min_score": cfg.get("smart_apply_min_score", 60),
+    }
+
+
+def get_boss_workflow_bridge_config() -> dict:
+    """返回 Boss → 主工作流桥接配置。"""
+    cfg = get_config().get("boss", {}).get("workflow_bridge", {})
+    return {
+        "enabled": cfg.get("enabled", True),
+        "auto_parse_jd": cfg.get("auto_parse_jd", True),
+    }

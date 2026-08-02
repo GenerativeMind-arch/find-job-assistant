@@ -106,3 +106,23 @@ boss:
   ai_reply_style: "professional"   # AI 回复风格: professional / casual / enthusiastic
   greeting_mode: "template"        # 招呼语模式: template / smart
   default_city: "全国"             # 默认搜索城市
+
+  # ── Agent Harness（Plan-then-Execute，可选高级功能）──────────────────
+  # 定位：手动操作为默认，Agent 自动执行为可选能力。
+  # 工具集：14 原子工具 + 3 复合技能（smart_scan / prepare_application / smart_apply）
+  agent:
+    enabled: true                    # 是否启用 Agent 自动化（暴露 /api/boss/agent/* 端点）
+    max_steps: 12                    # 单次任务最大执行步数
+    max_replans: 2                   # 失败后最大重规划次数
+    auto_execute: true               # 是否直接执行（false = dry-run 仅规划）
+    inter_step_delay_min: 2.0        # 步间最小随机延迟（秒，模拟人类节奏防风控）
+    inter_step_delay_max: 6.0        # 步间最大随机延迟（秒）
+    smart_scan_top_n: 5              # smart_scan 默认分析 TOP N
+    smart_apply_min_score: 60        # smart_apply 最低匹配分阈值（低于此分不投递）
+
+  # ── 工作流桥接（Boss 岗位 → 主流水线）─────────────────────────────
+  # 通过 POST /api/boss/import-job 将 Boss 搜索到的岗位导入 CopilotState.job，
+  # 随后在对话区输入"分析这个岗位"触发 jd→差距→简历→面试全链路。
+  workflow_bridge:
+    enabled: true                    # 是否启用 Boss 岗位导入到主工作流
+    auto_parse_jd: true              # 导入后是否标记 job 已解析（跳过 jd_agent 重新解析）

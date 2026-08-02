@@ -21,7 +21,7 @@
         <GapsPanel v-else-if="activeTab === 'gaps'" :gaps="gaps" :questions="questions" :session-id="sessionId" key="gaps" />
         <InterviewPanel v-else-if="activeTab === 'interview'" :interview-qa="interviewQa" :session-id="sessionId" key="interview" />
         <DebugPanel v-else-if="activeTab === 'debug'" :session-id="sessionId" :resume-content="resumeContent" :render-config="renderConfig" :triggered-agents="triggeredAgents" key="debug" />
-        <BossPanel v-else-if="activeTab === 'boss'" key="boss" />
+        <BossPanel v-else-if="activeTab === 'boss'" :session-id="sessionId" @imported="onBossImported" key="boss" />
       </transition>
     </div>
   </div>
@@ -48,6 +48,13 @@ const props = defineProps({
   interviewQa: Array,
   triggeredAgents: Array,
 })
+
+const emit = defineEmits(['imported'])
+
+function onBossImported(payload) {
+  // Boss 岗位导入工作流后，通知 App.vue 切换到对话区并自动触发分析
+  emit('imported', payload)
+}
 
 const activeTab = ref('intro')
 
