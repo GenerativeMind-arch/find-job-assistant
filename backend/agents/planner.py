@@ -1,0 +1,368 @@
+"""Planner Agent — 意图分类 + 执行计划生成 + 事件记录。
+
+支持 9 种意图（含新增 search_jd / search_knowledge）和复合意图。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import uuid
+from datetime import datetime, timezone
+from typing import Any
+
+from agents.json_contracts import IntentClassificationOutput
+from models.llm import get_llm, ainvoke_json_with_schema
+from prompts.intent_classification import INTENT_CLASSIFICATION_PROMPT
+from workflow.state import CopilotState
+from workflow.trace import append_trace, summarize_user_message
+from log import get_logger
+
+logger = get_logger("agent")
+
+# Intent → 基础执行链路
+# 实际执行计划由 _build_execution_plan 根据 state 动态调整
+_INTENT_PLAN: dict[str, list[str]] = {
+    # 数据输入类
+    "upload_jd": ["jd_agent", "gap_agent", "content_agent", "render_agent", "interview_agent"],
+    "upload_profile": ["profile_agent", "content_agent", "render_agent", "interview_agent"],
+    "search_jd": [],                                    # 特殊处理：先搜索展示结果，用户选择后再执行 pipeline
+    # 分析与生成类
+    "gap_analysis": ["gap_agent"],
+    "content_edit": ["content_agent", "render_agent"],
+    "render_edit": ["render_agent"],
+    # 查询与导出类
+    "search_knowledge": ["question_agent"],              # 知识库查询走 question_agent（带 RAG 增强）
+    "export": [],
+    "ask_question": ["question_agent"],
+}
+
+
+async def _classify_intent_async(state: CopilotState) -> IntentClassificationOutput:
+    """异步调用 LLM 进行意图分类（支持复合意图和实体提取）。"""
+    prompt = INTENT_CLASSIFICATION_PROMPT.format(
+        has_job=state.job is not None,
+        has_profile=state.candidate_profile is not None,
+        has_resume=state.resume_content_json is not None,
+        user_message=state.user_message,
+    )
+    llm = get_llm()
+    result = await ainvoke_json_with_schema(
+        llm, prompt, IntentClassificationOutput, logger, "Planner Agent"
+    )
+    logger.info(
+        "Intent classified: primary=%s, secondary=%s, entities=%s (reason: %s)",
+        result.primary_intent,
+        result.secondary_intents,
+        result.entities.model_dump() if result.entities else {},
+        result.reason,
+    )
+    return result
+
+
+# ── 职位名关键词（用于 heuristic 检测）───────────────────────
+_JOB_TITLE_KEYWORDS = [
+    "工程师", "分析师", "经理", "开发", "设计", "运营", "产品",
+    "架构师", "科学家", "算法", "测试", "前端", "后端", "全栈",
+    "数据", "运维", "安全", "研究员", "总监", "主管", "专员",
+    "顾问", "助理", "实习生", "管培生", "编辑", "文案", "策划",
+    "销售", "市场", "财务", "HR", "人力", "行政", "法务",
+]
+
+
+def _looks_like_job_title(text: str) -> bool:
+    """Heuristic：短文本 + 含职位关键词 → 很可能是职位搜索。"""
+    stripped = text.strip()
+    if len(stripped) > 120:
+        return False
+    return any(kw in stripped for kw in _JOB_TITLE_KEYWORDS)
+
+
+def _force_search_jd_if_short_job_title(primary: str, state: CopilotState) -> str:
+    """硬编码保护：当 LLM 把短职位名误判为 upload_jd/ask_question 时纠正。
+
+    触发条件（全部满足）：
+    1. 当前没有 JD（state.job is None）
+    2. 用户输入短（<= 120 字符）
+    3. 输入中包含职位关键词
+    4. LLM 分类为 upload_jd 或 ask_question
+    """
+    if state.job is not None:
+        return primary  # 已有 JD，不做纠正
+    if primary in ("upload_jd", "ask_question") and _looks_like_job_title(state.user_message):
+        logger.info(
+            "Heuristic override: LLM classified '%s' as '%s' but it looks like a job title → forcing search_jd",
+            state.user_message[:60], primary,
+        )
+        return "search_jd"
+    return primary
+
+
+def _build_execution_plan(intent: str, secondary: list[str], state: CopilotState) -> list[str]:
+    """根据意图和当前状态构建实际执行计划。
+
+    动态调整逻辑：
+    - search_jd：先搜索，用户选择后走 upload_jd pipeline
+    - upload_jd 且无 profile：只跑 jd_agent（无法生成简历）
+    - content_edit + render_edit 复合：一起排入 plan
+    - search_knowledge：走 question_agent（带 RAG）
+    """
+    base_plan = list(_INTENT_PLAN.get(intent, []))
+
+    # ── search_jd 特殊处理 ──
+    if intent == "search_jd":
+        # 搜索阶段不跑 Agent，由 planner 直接调用 JobSearchService
+        return []
+
+    # ── search_knowledge ──
+    if intent == "search_knowledge":
+        return ["question_agent"]
+
+    # ── upload_jd 条件分支 ──
+    if intent == "upload_jd":
+        if state.candidate_profile is None:
+            # 没有候选人数据，只跑 JD 解析
+            return ["jd_agent"]
+        if state.job is not None:
+            # 已有 JD，覆盖更新 → 全链路
+            pass
+
+    # ── 复合意图合并 ──
+    merged: list[str] = list(base_plan)
+    seen = set(merged)
+
+    # 将 secondary intents 对应的 agent 合并到计划中
+    _SECONDARY_AGENTS: dict[str, str] = {
+        "render_edit": "render_agent",
+        "content_edit": "content_agent",
+        "gap_analysis": "gap_agent",
+        "export": "",  # export 不通过 agent 处理
+    }
+
+    for sec in secondary:
+        agent = _SECONDARY_AGENTS.get(sec)
+        if agent and agent not in seen:
+            merged.append(agent)
+            seen.add(agent)
+
+    return merged
+
+
+async def _handle_search_jd(state: CopilotState) -> dict[str, Any]:
+    """处理 search_jd 意图：调用 JobSearchService 搜索 JD。
+
+    逻辑分层：
+    1. MCP 搜索成功 → 展示结果列表，等待用户选择
+    2. MCP 失败 → LLM 生成兜底 → 直接入库，跳过 jd_agent（Job 已就绪）
+    3. 全部失败 → 提示用户手动输入
+    """
+    from services.job_search import JobSearchService
+
+    job_title = state.user_message.strip()
+
+    try:
+        search_result = await JobSearchService.search_jd(job_title)
+    except Exception as exc:
+        logger.error("JobSearchService failed: %s", exc)
+        search_result = {
+            "source": "failed",
+            "query": job_title,
+            "jobs": [],
+            "count": 0,
+            "message": f"JD 搜索服务暂时不可用：{exc}。请尝试直接粘贴 JD 内容。",
+        }
+
+    jobs: list[dict] = search_result.get("jobs", [])
+    source: str = search_result.get("source", "failed")
+    message: str = search_result.get("message", "")
+
+    # ── 情况 1：搜索成功（多条真实结果）─────────────────
+    if jobs and source in ("mcp", "job_kb"):
+        job_list_lines = []
+        for i, job in enumerate(jobs, 1):
+            company = job.get("company", "未知公司")
+            salary = job.get("salary", "薪资面议")
+            city = job.get("city", "")
+            exp = job.get("experience", "")
+            desc = job.get("description", "")
+            desc_preview = desc[:120] + "..." if len(desc) > 120 else desc
+            location = f" · {city}" if city else ""
+            requirements = f" · {exp}" if exp else ""
+            job_list_lines.append(
+                f"{i}. **{job.get('title', job_title)}** — {company}\n"
+                f"   薪资: {salary}{location}{requirements}\n"
+                f"   {desc_preview}"
+            )
+        job_list_text = "\n\n".join(job_list_lines)
+        reply = (
+            "搜索「**" + job_title + "**」相关职位：\n\n"
+            "找到以下来自各招聘平台的实时职位：\n\n"
+            + job_list_text + "\n\n"
+            "---\n"
+            "请回复数字序号选择最匹配的职位（如 1），"
+            "或输入「生成」让我根据该职位名称直接创建 JD。"
+        )
+        return {
+            "reply_message": reply,
+            "current_intent": "search_jd",
+            "execution_plan": [],
+            "triggered_agents": [],
+            "workflow_trace": append_trace(
+                state,
+                node="planner",
+                input_summary=f"用户搜索职位：{summarize_user_message(state.user_message)}",
+                output_summary=f"MCP 搜索完成，共 {len(jobs)} 条结果",
+                artifacts={"intent": "search_jd", "source": "mcp", "result_count": len(jobs)},
+            ),
+        }
+
+    # ── 情况 2：LLM 生成成功（兜底方案）─────────────────────
+    if jobs and source == "llm":
+        job = jobs[0]
+        # 将 LLM 生成的 JD 转为 Job 对象并入库 state
+        job_data = JobSearchService.build_job_from_search_result(job, state.session_id)
+
+        reply = (
+            "未搜索到实时职位数据，已根据「**" + job_title + "**」"
+            "的行业通用要求生成 JD：\n\n"
+            "**" + str(job.get("title", job_title)) + "**\n"
+            "- 行业：" + str(job.get("industry", "未指定")) + "\n"
+            "- 技术栈：" + ", ".join(job.get("tech_stack", []) or ["未指定"]) + "\n"
+            "- 硬技能：" + ", ".join(job.get("hard_skills", []) or ["未指定"]) + "\n"
+            "- 学历要求：" + str(job.get("education", job.get("education_requirement", "未指定"))) + "\n"
+            "- 经验要求：" + str(job.get("experience", job.get("experience_requirement", "未指定"))) + "\n\n"
+            "我将基于这份 JD 为你生成简历和面试准备内容。如需调整，请直接告诉我。"
+        )
+
+        # 关键：跳过 jd_agent，因为 Job 已由 LLM 生成完毕
+        plan = _build_execution_plan("upload_jd", [], state)
+        plan = [a for a in plan if a != "jd_agent"]
+
+        return {
+            "reply_message": reply,
+            "job": job_data,
+            "current_intent": "upload_jd",
+            "execution_plan": plan,
+            "triggered_agents": list(plan),
+            "workflow_trace": append_trace(
+                state,
+                node="planner",
+                input_summary=f"用户搜索职位：{summarize_user_message(state.user_message)}",
+                output_summary=f"LLM 生成 JD（{source}）：{job.get('title', job_title)}",
+                artifacts={
+                    "intent": "search_jd",
+                    "source": source,
+                    "job_title": job.get("title", job_title),
+                },
+            ),
+        }
+
+    # ── 情况 3：全部失败 ─────────────────────────────────────
+    reply = message or (
+        "很抱歉，未能获取到「" + job_title + "」的职位描述。"
+        "请尝试使用更具体的职位名称，或直接粘贴 JD 内容。"
+    )
+    return {
+        "reply_message": reply,
+        "current_intent": "search_jd",
+        "execution_plan": [],
+        "triggered_agents": [],
+        "workflow_trace": append_trace(
+            state,
+            node="planner",
+            input_summary=f"用户搜索职位：{summarize_user_message(state.user_message)}",
+            output_summary=f"搜索失败（{source}）",
+            artifacts={"intent": "search_jd", "source": source, "result_count": 0},
+        ),
+    }
+
+
+async def planner_node_async(state: CopilotState) -> dict[str, Any]:
+    """Planner Agent 异步节点函数。
+
+    职责：
+    1. 意图分类（支持复合意图）
+    2. 构建执行计划
+    3. 特殊意图处理（search_jd 搜索、search_knowledge RAG 查询）
+    """
+    logger.info("Planner Agent started for session %s", state.session_id)
+
+    # 1. 意图分类
+    try:
+        intent_result = await _classify_intent_async(state)
+    except RuntimeError as exc:
+        logger.error("Planner Agent failed: %s", exc)
+        return {
+            "current_intent": "ask_question",
+            "execution_plan": [],
+            "triggered_agents": [],
+            "workflow_trace": append_trace(
+                state,
+                node="planner",
+                status="failed",
+                input_summary=f"用户输入：{summarize_user_message(state.user_message)}",
+                output_summary="意图识别失败：模型输出格式异常，请稍后重试。",
+                error=str(exc),
+            ),
+        }
+
+    primary = intent_result.primary_intent or "ask_question"
+    secondary = intent_result.secondary_intents or []
+
+    # ── 硬编码保护：短输入 + 像职位名 → 强制 search_jd ──
+    # LLM 有时会把"Agent应用开发工程师"这种短职位名误判为 upload_jd 或 ask_question
+    primary = _force_search_jd_if_short_job_title(primary, state)
+
+    # ── search_jd 特殊处理：搜索 JD 并返回结果 ──
+    if primary == "search_jd":
+        return await _handle_search_jd(state)
+
+    # 2. 构建执行计划
+    plan = _build_execution_plan(primary, secondary, state)
+    logger.info("Execution plan: primary=%s, secondary=%s, plan=%s", primary, secondary, plan)
+
+    # 3. 生成消息 ID
+    message_id = f"msg_{uuid.uuid4().hex[:12]}"
+
+    updates: dict[str, Any] = {
+        "current_intent": primary,
+        "execution_plan": plan,
+        "triggered_agents": list(plan),
+        "workflow_trace": append_trace(
+            state,
+            node="planner",
+            input_summary=f"用户输入：{summarize_user_message(state.user_message)}",
+            output_summary="",
+            artifacts={
+                "intent": primary,           # 向后兼容旧测试
+                "primary_intent": primary,
+                "secondary_intents": secondary,
+                "reason": intent_result.reason,
+                "execution_plan": plan,
+                "entities": intent_result.entities.model_dump() if intent_result.entities else {},
+            },
+        ),
+    }
+
+    # 4. 无需执行 Agent 的意图直接回复
+    if not plan:
+        if primary == "export":
+            updates["workflow_trace"] = append_trace(
+                state.model_copy(update={"workflow_trace": updates["workflow_trace"]}),
+                node="export",
+                status="skipped",
+                input_summary="用户请求导出。",
+                output_summary="导出功能将在后续版本中支持。",
+                artifacts={"supported": False},
+            )
+
+    updates["meta"] = state.meta.model_copy(update={
+        "last_user_message_id": message_id,
+    })
+
+    return updates
+
+
+def planner_node(state: CopilotState) -> dict[str, Any]:
+    """Planner Agent 同步兼容入口。"""
+    return asyncio.run(planner_node_async(state))

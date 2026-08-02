@@ -1,0 +1,1135 @@
+{
+  "version": "0.1",
+  "metadata": {
+    "title": "AutoLDiT Architecture Details",
+    "created_by": "visiomaster",
+    "style_profile": "paper_white",
+    "fidelity": "approximate",
+    "source_image": "D:\\研途\\真工作\\01-Study\\01-Project\\boos-ai\\总体框架图-2.png",
+    "source_aspect_ratio": 1.676
+  },
+  "page": {
+    "width": 1624,
+    "height": 969,
+    "units": "px",
+    "origin": "top-left",
+    "target_width_in": 16.24,
+    "background": "#FFFFFF"
+  },
+  "nodes": [
+    {
+      "id": "h_s1",
+      "type": "text_block",
+      "x": 50,
+      "y": 20,
+      "w": 100,
+      "h": 26,
+      "style": {
+        "font_size": 13,
+        "font_weight": "bold",
+        "text_color": "#023685",
+        "font_family": "Microsoft YaHei UI"
+      },
+      "text": "Stage 1"
+    },
+    {
+      "id": "h_ss",
+      "type": "text_block",
+      "x": 150,
+      "y": 20,
+      "w": 400,
+      "h": 26,
+      "style": {
+        "font_size": 13,
+        "font_weight": "bold",
+        "text_color": "#023685",
+        "font_family": "Microsoft YaHei UI"
+      },
+      "text": "Search Space Definition & Supernet Training"
+    },
+    {
+      "id": "h_backbone",
+      "type": "text_block",
+      "x": 700,
+      "y": 20,
+      "w": 500,
+      "h": 26,
+      "style": {
+        "font_size": 13,
+        "font_weight": "bold",
+        "text_color": "#184b99",
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "U-shaped Hybrid Attention Backbone"
+    },
+    {
+      "id": "h_backbone_sub",
+      "type": "text_block",
+      "x": 700,
+      "y": 44,
+      "w": 500,
+      "h": 20,
+      "style": {
+        "font_size": 10,
+        "text_color": "#666666",
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "(Shared by Supernet & Subnet)"
+    },
+    {
+      "id": "h_s3",
+      "type": "text_block",
+      "x": 1200,
+      "y": 20,
+      "w": 80,
+      "h": 26,
+      "style": {
+        "font_size": 13,
+        "font_weight": "bold",
+        "text_color": "#1a1a2e",
+        "font_family": "Microsoft YaHei UI"
+      },
+      "text": "Stage 3"
+    },
+    {
+      "id": "h_retrain",
+      "type": "text_block",
+      "x": 1280,
+      "y": 20,
+      "w": 300,
+      "h": 26,
+      "style": {
+        "font_size": 13,
+        "font_weight": "bold",
+        "text_color": "#1a1a2e",
+        "font_family": "Microsoft YaHei UI"
+      },
+      "text": "Subnet Retraining"
+    },
+    {
+      "id": "h_retrain_sub",
+      "type": "text_block",
+      "x": 1280,
+      "y": 44,
+      "w": 300,
+      "h": 20,
+      "style": {
+        "font_size": 10,
+        "text_color": "#666666",
+        "font_family": "Microsoft YaHei UI"
+      },
+      "text": "(Hierarchical Distillation)"
+    },
+    {
+      "id": "ss1",
+      "type": "process_box",
+      "x": 40,
+      "y": 80,
+      "w": 220,
+      "h": 30,
+      "style": {
+        "fill_color": "#d4e3f3",
+        "text_color": "#023685",
+        "font_size": 10,
+        "font_weight": "bold",
+        "corner_radius": 4,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "1. Search Space (Multi-scale)"
+    },
+    {
+      "id": "ss2",
+      "type": "process_box",
+      "x": 270,
+      "y": 80,
+      "w": 240,
+      "h": 30,
+      "style": {
+        "fill_color": "#d4e3f3",
+        "text_color": "#023685",
+        "font_size": 10,
+        "font_weight": "bold",
+        "corner_radius": 4,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "2. Supernet (Shared Weights)"
+    },
+    {
+      "id": "cfg_box",
+      "type": "group_container",
+      "x": 40,
+      "y": 120,
+      "w": 490,
+      "h": 250,
+      "style": {
+        "fill_color": "#f5f7fb",
+        "border_color": "#9cb5c2",
+        "border_width": 1.5,
+        "corner_radius": 4
+      },
+      "label": {
+        "text": "Search Space Configuration",
+        "style": {
+          "font_size": 10,
+          "font_weight": "bold",
+          "text_color": "#023685"
+        },
+        "position": "top_center",
+        "inside": true
+      }
+    },
+    {
+      "id": "cfg_0",
+      "type": "text_block",
+      "x": 55,
+      "y": 155,
+      "w": 460,
+      "h": 36,
+      "style": {
+        "font_size": 10,
+        "text_color": "#333333",
+        "font_family": "Consolas"
+      },
+      "text": "Depth (Layers):  S:8 / B:14 / L:18"
+    },
+    {
+      "id": "cfg_1",
+      "type": "text_block",
+      "x": 55,
+      "y": 197,
+      "w": 460,
+      "h": 36,
+      "style": {
+        "font_size": 10,
+        "text_color": "#333333",
+        "font_family": "Consolas"
+      },
+      "text": "# Heads:  S:{4,8,12} / B:{8,12,16} / L:{16,20,24}"
+    },
+    {
+      "id": "cfg_2",
+      "type": "text_block",
+      "x": 55,
+      "y": 239,
+      "w": 460,
+      "h": 36,
+      "style": {
+        "font_size": 10,
+        "text_color": "#333333",
+        "font_family": "Consolas"
+      },
+      "text": "MLP Ratio:  Searchable feed-forward expansion"
+    },
+    {
+      "id": "cfg_3",
+      "type": "text_block",
+      "x": 55,
+      "y": 281,
+      "w": 460,
+      "h": 36,
+      "style": {
+        "font_size": 10,
+        "text_color": "#333333",
+        "font_family": "Consolas"
+      },
+      "text": "Activation:  GELU / SiLU / ReLU"
+    },
+    {
+      "id": "cfg_4",
+      "type": "text_block",
+      "x": 55,
+      "y": 323,
+      "w": 460,
+      "h": 36,
+      "style": {
+        "font_size": 10,
+        "text_color": "#333333",
+        "font_family": "Consolas"
+      },
+      "text": "Kernel Size:  DW Conv {3x3, 5x5, 7x7}"
+    },
+    {
+      "id": "ss3",
+      "type": "process_box",
+      "x": 40,
+      "y": 380,
+      "w": 490,
+      "h": 32,
+      "style": {
+        "fill_color": "#e8f0fe",
+        "text_color": "#023685",
+        "font_size": 10,
+        "font_weight": "bold",
+        "corner_radius": 4,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "3. Supernet Training (ImageNet -> Sampled Sub-architecture -> Shared Weights)"
+    },
+    {
+      "id": "teacher_info",
+      "type": "text_block",
+      "x": 40,
+      "y": 425,
+      "w": 490,
+      "h": 22,
+      "style": {
+        "font_size": 10,
+        "text_color": "#555555",
+        "font_family": "Microsoft YaHei UI"
+      },
+      "text": "Teacher: Large Pretrained U-DiT (Frozen) -> Knowledge Distillation"
+    },
+    {
+      "id": "backbone_box",
+      "type": "group_container",
+      "x": 560,
+      "y": 80,
+      "w": 580,
+      "h": 370,
+      "style": {
+        "fill_color": "#f9fbfd",
+        "border_color": "#7d95ae",
+        "border_width": 1.5,
+        "corner_radius": 6
+      }
+    },
+    {
+      "id": "enc_label",
+      "type": "text_block",
+      "x": 580,
+      "y": 100,
+      "w": 200,
+      "h": 22,
+      "style": {
+        "font_size": 10,
+        "font_weight": "bold",
+        "text_color": "#1a1a2e",
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Encoder (Downsampling)"
+    },
+    {
+      "id": "enc_stack",
+      "type": "stacked_process",
+      "x": 580,
+      "y": 125,
+      "w": 100,
+      "h": 120,
+      "style": {
+        "fill_color": "#c9d9de",
+        "text_color": "#1a1a2e",
+        "font_size": 9,
+        "corner_radius": 4,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1,
+        "text_fit": "shrink_to_fit"
+      },
+      "text": "Linear Transformer\nBlock\nBlock\nBlock",
+      "count": 3,
+      "stack_direction": "vertical"
+    },
+    {
+      "id": "bn_box",
+      "type": "process_box",
+      "x": 730,
+      "y": 135,
+      "w": 120,
+      "h": 50,
+      "style": {
+        "fill_color": "#184b99",
+        "text_color": "#FFFFFF",
+        "font_size": 9,
+        "font_weight": "bold",
+        "corner_radius": 6,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Bottleneck\n(Standard Transformer)"
+    },
+    {
+      "id": "bn_detail",
+      "type": "text_block",
+      "x": 730,
+      "y": 190,
+      "w": 120,
+      "h": 18,
+      "style": {
+        "font_size": 8,
+        "text_color": "#555555",
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Standard Transformer Block"
+    },
+    {
+      "id": "dec_label",
+      "type": "text_block",
+      "x": 920,
+      "y": 100,
+      "w": 200,
+      "h": 22,
+      "style": {
+        "font_size": 10,
+        "font_weight": "bold",
+        "text_color": "#1a1a2e",
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Decoder (Upsampling)"
+    },
+    {
+      "id": "dec_stack",
+      "type": "stacked_process",
+      "x": 920,
+      "y": 125,
+      "w": 100,
+      "h": 120,
+      "style": {
+        "fill_color": "#c9d9de",
+        "text_color": "#1a1a2e",
+        "font_size": 9,
+        "corner_radius": 4,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1,
+        "text_fit": "shrink_to_fit"
+      },
+      "text": "Linear Transformer\nBlock\nBlock\nBlock",
+      "count": 3,
+      "stack_direction": "vertical"
+    },
+    {
+      "id": "input_noise",
+      "type": "process_box",
+      "x": 580,
+      "y": 265,
+      "w": 80,
+      "h": 25,
+      "style": {
+        "fill_color": "#d4e3f3",
+        "text_color": "#184b99",
+        "font_size": 8,
+        "corner_radius": 3,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Noised Latent"
+    },
+    {
+      "id": "input_cond",
+      "type": "process_box",
+      "x": 580,
+      "y": 295,
+      "w": 80,
+      "h": 25,
+      "style": {
+        "fill_color": "#d4e3f3",
+        "text_color": "#184b99",
+        "font_size": 8,
+        "corner_radius": 3,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Condition Embed"
+    },
+    {
+      "id": "ln_out",
+      "type": "process_box",
+      "x": 960,
+      "y": 260,
+      "w": 70,
+      "h": 22,
+      "style": {
+        "fill_color": "#e8f0fe",
+        "text_color": "#184b99",
+        "font_size": 8,
+        "corner_radius": 3,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Layer Norm"
+    },
+    {
+      "id": "linear_out",
+      "type": "process_box",
+      "x": 960,
+      "y": 288,
+      "w": 70,
+      "h": 22,
+      "style": {
+        "fill_color": "#e8f0fe",
+        "text_color": "#184b99",
+        "font_size": 8,
+        "corner_radius": 3,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Linear+Reshape"
+    },
+    {
+      "id": "pred_out",
+      "type": "process_box",
+      "x": 960,
+      "y": 320,
+      "w": 70,
+      "h": 30,
+      "style": {
+        "fill_color": "#ffd700",
+        "text_color": "#1a1a2e",
+        "font_size": 8,
+        "font_weight": "bold",
+        "corner_radius": 4,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Predicted\nVector Field"
+    },
+    {
+      "id": "block_legend",
+      "type": "group_container",
+      "x": 580,
+      "y": 360,
+      "w": 540,
+      "h": 80,
+      "style": {
+        "fill_color": "#fafafa",
+        "border_color": "#cccccc",
+        "border_width": 1,
+        "corner_radius": 4
+      }
+    },
+    {
+      "id": "bl_0",
+      "type": "text_block",
+      "x": 595,
+      "y": 372,
+      "w": 500,
+      "h": 20,
+      "style": {
+        "font_size": 9,
+        "text_color": "#555555",
+        "font_family": "Microsoft YaHei UI"
+      },
+      "text": "  Linear Transformer Block: Encoder/Decoder basic unit with linear attention"
+    },
+    {
+      "id": "bl_1",
+      "type": "text_block",
+      "x": 595,
+      "y": 394,
+      "w": 500,
+      "h": 20,
+      "style": {
+        "font_size": 9,
+        "text_color": "#555555",
+        "font_family": "Microsoft YaHei UI"
+      },
+      "text": "  Standard Transformer Block: Bottleneck with standard self-attention"
+    },
+    {
+      "id": "bl_2",
+      "type": "text_block",
+      "x": 595,
+      "y": 416,
+      "w": 500,
+      "h": 20,
+      "style": {
+        "font_size": 9,
+        "text_color": "#555555",
+        "font_family": "Microsoft YaHei UI"
+      },
+      "text": "  Skip Connection: Encoder-Decoder skip links for multi-scale features"
+    },
+    {
+      "id": "opt_arch",
+      "type": "process_box",
+      "x": 1200,
+      "y": 85,
+      "w": 220,
+      "h": 35,
+      "style": {
+        "fill_color": "#fff3cd",
+        "text_color": "#856404",
+        "font_size": 10,
+        "font_weight": "bold",
+        "corner_radius": 6,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "1. Optimal Architecture\n(From Stage 2)"
+    },
+    {
+      "id": "student",
+      "type": "process_box",
+      "x": 1200,
+      "y": 135,
+      "w": 220,
+      "h": 45,
+      "style": {
+        "fill_color": "#d4e3f3",
+        "text_color": "#184b99",
+        "font_size": 10,
+        "font_weight": "bold",
+        "corner_radius": 6,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "2. Subnet Retraining\nwith Hierarchical Distillation"
+    },
+    {
+      "id": "student_note",
+      "type": "text_block",
+      "x": 1200,
+      "y": 185,
+      "w": 220,
+      "h": 18,
+      "style": {
+        "font_size": 8,
+        "text_color": "#888888",
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Student: Noised Latent -> Predicted Noise"
+    },
+    {
+      "id": "teacher",
+      "type": "process_box",
+      "x": 1200,
+      "y": 215,
+      "w": 220,
+      "h": 40,
+      "style": {
+        "fill_color": "#184b99",
+        "text_color": "#FFFFFF",
+        "font_size": 10,
+        "font_weight": "bold",
+        "corner_radius": 6,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Teacher Model (Frozen)"
+    },
+    {
+      "id": "traj_label",
+      "type": "text_block",
+      "x": 1200,
+      "y": 270,
+      "w": 110,
+      "h": 20,
+      "style": {
+        "font_size": 10,
+        "font_weight": "bold",
+        "text_color": "#5f5367",
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Trajectory"
+    },
+    {
+      "id": "traj_sub",
+      "type": "text_block",
+      "x": 1200,
+      "y": 287,
+      "w": 110,
+      "h": 18,
+      "style": {
+        "font_size": 8,
+        "text_color": "#888888",
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Distillation"
+    },
+    {
+      "id": "dist_label",
+      "type": "text_block",
+      "x": 1320,
+      "y": 270,
+      "w": 110,
+      "h": 20,
+      "style": {
+        "font_size": 10,
+        "font_weight": "bold",
+        "text_color": "#5f5367",
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Distribution"
+    },
+    {
+      "id": "dist_sub",
+      "type": "text_block",
+      "x": 1320,
+      "y": 287,
+      "w": 110,
+      "h": 18,
+      "style": {
+        "font_size": 8,
+        "text_color": "#888888",
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Distillation (L_dist)"
+    },
+    {
+      "id": "fm_loss",
+      "type": "text_block",
+      "x": 1200,
+      "y": 315,
+      "w": 250,
+      "h": 22,
+      "style": {
+        "font_size": 10,
+        "font_weight": "bold",
+        "text_color": "#5f5367",
+        "font_family": "Cambria Math"
+      },
+      "text": "L_FM = Flow Matching Loss"
+    },
+    {
+      "id": "loss_total",
+      "type": "process_box",
+      "x": 1200,
+      "y": 350,
+      "w": 300,
+      "h": 25,
+      "style": {
+        "fill_color": "#5f5367",
+        "text_color": "#FFFFFF",
+        "font_size": 10,
+        "font_weight": "bold",
+        "corner_radius": 4,
+        "font_family": "Cambria Math",
+        "text_align": 1
+      },
+      "text": "L_retrain = L_dist + L_traj + L_FM"
+    },
+    {
+      "id": "s2_box",
+      "type": "group_container",
+      "x": 40,
+      "y": 465,
+      "w": 1540,
+      "h": 200,
+      "style": {
+        "fill_color": "#fef9f5",
+        "border_color": "#c66c35",
+        "border_width": 2,
+        "corner_radius": 6
+      },
+      "label": {
+        "text": "Stage 2: Architecture Search (Evolutionary Algorithm + Surrogate Model)",
+        "style": {
+          "font_size": 12,
+          "font_weight": "bold",
+          "text_color": "#8B4513"
+        },
+        "position": "top_center",
+        "inside": true
+      }
+    },
+    {
+      "id": "ea_title",
+      "type": "process_box",
+      "x": 60,
+      "y": 505,
+      "w": 160,
+      "h": 28,
+      "style": {
+        "fill_color": "#f5e6d3",
+        "text_color": "#8B4513",
+        "font_size": 10,
+        "font_weight": "bold",
+        "corner_radius": 12,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Evolutionary Algorithm"
+    },
+    {
+      "id": "ea2_0",
+      "type": "process_box",
+      "x": 60,
+      "y": 545,
+      "w": 100,
+      "h": 40,
+      "style": {
+        "fill_color": "#f5e6d3",
+        "text_color": "#8B4513",
+        "font_size": 9,
+        "corner_radius": 12,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Population"
+    },
+    {
+      "id": "ea2_1",
+      "type": "process_box",
+      "x": 200,
+      "y": 545,
+      "w": 100,
+      "h": 40,
+      "style": {
+        "fill_color": "#f5e6d3",
+        "text_color": "#8B4513",
+        "font_size": 9,
+        "corner_radius": 12,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Individual\nEvaluation"
+    },
+    {
+      "id": "ea2_2",
+      "type": "process_box",
+      "x": 340,
+      "y": 545,
+      "w": 100,
+      "h": 40,
+      "style": {
+        "fill_color": "#f5e6d3",
+        "text_color": "#8B4513",
+        "font_size": 9,
+        "corner_radius": 12,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Selection"
+    },
+    {
+      "id": "ea2_3",
+      "type": "process_box",
+      "x": 480,
+      "y": 545,
+      "w": 100,
+      "h": 40,
+      "style": {
+        "fill_color": "#f5e6d3",
+        "text_color": "#8B4513",
+        "font_size": 9,
+        "corner_radius": 12,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Crossover"
+    },
+    {
+      "id": "ea2_4",
+      "type": "process_box",
+      "x": 620,
+      "y": 545,
+      "w": 100,
+      "h": 40,
+      "style": {
+        "fill_color": "#f5e6d3",
+        "text_color": "#8B4513",
+        "font_size": 9,
+        "corner_radius": 12,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Mutation"
+    },
+    {
+      "id": "supernet_eval",
+      "type": "process_box",
+      "x": 60,
+      "y": 610,
+      "w": 200,
+      "h": 32,
+      "style": {
+        "fill_color": "#d4e3f3",
+        "text_color": "#184b99",
+        "font_size": 9,
+        "font_weight": "bold",
+        "corner_radius": 6,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Supernet Evaluation (Shared Weights)"
+    },
+    {
+      "id": "eval_results",
+      "type": "process_box",
+      "x": 280,
+      "y": 610,
+      "w": 180,
+      "h": 32,
+      "style": {
+        "fill_color": "#e8f0fe",
+        "text_color": "#184b99",
+        "font_size": 9,
+        "corner_radius": 6,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Evaluation Results"
+    },
+    {
+      "id": "surrogate_mlp",
+      "type": "process_box",
+      "x": 700,
+      "y": 545,
+      "w": 200,
+      "h": 40,
+      "style": {
+        "fill_color": "#599768",
+        "text_color": "#FFFFFF",
+        "font_size": 10,
+        "font_weight": "bold",
+        "corner_radius": 6,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Surrogate Model (MLP)"
+    },
+    {
+      "id": "pred_topn",
+      "type": "process_box",
+      "x": 700,
+      "y": 610,
+      "w": 200,
+      "h": 32,
+      "style": {
+        "fill_color": "#a8d8a8",
+        "text_color": "#2d5a2d",
+        "font_size": 9,
+        "font_weight": "bold",
+        "corner_radius": 6,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Predicted Top-N Architectures"
+    },
+    {
+      "id": "ranking_fb",
+      "type": "process_box",
+      "x": 500,
+      "y": 550,
+      "w": 160,
+      "h": 28,
+      "style": {
+        "fill_color": "#a8d8a8",
+        "text_color": "#2d5a2d",
+        "font_size": 9,
+        "corner_radius": 15,
+        "font_family": "Microsoft YaHei UI",
+        "text_align": 1
+      },
+      "text": "Ranking Score Feedback"
+    }
+  ],
+  "edges": [
+    {
+      "id": "ea2_0_1",
+      "type": "arrow_connector",
+      "from": "ea2_0",
+      "from_anchor": "right",
+      "to": "ea2_1",
+      "to_anchor": "left",
+      "route": "horizontal",
+      "style": {
+        "line_color": "#8B4513",
+        "line_width": 1,
+        "arrowhead": "end"
+      }
+    },
+    {
+      "id": "ea2_1_2",
+      "type": "arrow_connector",
+      "from": "ea2_1",
+      "from_anchor": "right",
+      "to": "ea2_2",
+      "to_anchor": "left",
+      "route": "horizontal",
+      "style": {
+        "line_color": "#8B4513",
+        "line_width": 1,
+        "arrowhead": "end"
+      }
+    },
+    {
+      "id": "ea2_2_3",
+      "type": "arrow_connector",
+      "from": "ea2_2",
+      "from_anchor": "right",
+      "to": "ea2_3",
+      "to_anchor": "left",
+      "route": "horizontal",
+      "style": {
+        "line_color": "#8B4513",
+        "line_width": 1,
+        "arrowhead": "end"
+      }
+    },
+    {
+      "id": "ea2_3_4",
+      "type": "arrow_connector",
+      "from": "ea2_3",
+      "from_anchor": "right",
+      "to": "ea2_4",
+      "to_anchor": "left",
+      "route": "horizontal",
+      "style": {
+        "line_color": "#8B4513",
+        "line_width": 1,
+        "arrowhead": "end"
+      }
+    },
+    {
+      "id": "e_sel_sup",
+      "type": "arrow_connector",
+      "from": "ea2_2",
+      "to": "supernet_eval",
+      "route": "orthogonal",
+      "style": {
+        "line_color": "#555555",
+        "line_width": 1,
+        "arrowhead": "end"
+      }
+    },
+    {
+      "id": "e_sup_eval",
+      "type": "arrow_connector",
+      "from": "supernet_eval",
+      "from_anchor": "right",
+      "to": "eval_results",
+      "to_anchor": "left",
+      "route": "horizontal",
+      "style": {
+        "line_color": "#555555",
+        "line_width": 1,
+        "arrowhead": "end"
+      }
+    },
+    {
+      "id": "e_eval_surr",
+      "type": "arrow_connector",
+      "from": "eval_results",
+      "from_anchor": "right",
+      "to": "surrogate_mlp",
+      "to_anchor": "left",
+      "route": "horizontal",
+      "style": {
+        "line_color": "#599768",
+        "line_width": 1.5,
+        "arrowhead": "end"
+      }
+    },
+    {
+      "id": "e_surr_topn",
+      "type": "arrow_connector",
+      "from": "surrogate_mlp",
+      "to": "pred_topn",
+      "route": "vertical",
+      "style": {
+        "line_color": "#599768",
+        "line_width": 1,
+        "arrowhead": "end"
+      }
+    },
+    {
+      "id": "e_surr_rank",
+      "type": "arrow_connector",
+      "from": "surrogate_mlp",
+      "from_anchor": "left",
+      "to": "ranking_fb",
+      "to_anchor": "right",
+      "route": "horizontal",
+      "style": {
+        "line_color": "#599768",
+        "line_width": 1,
+        "dash_pattern": "dash",
+        "arrowhead": "end"
+      }
+    },
+    {
+      "id": "e_rank_ea",
+      "type": "arrow_connector",
+      "from": "ranking_fb",
+      "from_anchor": "left",
+      "to": "ea2_1",
+      "to_anchor": "right",
+      "route": "horizontal",
+      "style": {
+        "line_color": "#599768",
+        "line_width": 1,
+        "dash_pattern": "dash",
+        "arrowhead": "end"
+      }
+    },
+    {
+      "id": "enc_bn",
+      "type": "arrow_connector",
+      "from": "enc_stack",
+      "to": "bn_box",
+      "route": "vertical",
+      "style": {
+        "line_color": "#555555",
+        "line_width": 1,
+        "arrowhead": "end"
+      }
+    },
+    {
+      "id": "bn_dec",
+      "type": "arrow_connector",
+      "from": "bn_box",
+      "to": "dec_stack",
+      "route": "vertical",
+      "style": {
+        "line_color": "#555555",
+        "line_width": 1,
+        "arrowhead": "end"
+      }
+    },
+    {
+      "id": "sk_0",
+      "type": "arrow_connector",
+      "from": "enc_stack",
+      "from_anchor": "right@0.2",
+      "to": "dec_stack",
+      "to_anchor": "left@0.2",
+      "route": "horizontal",
+      "style": {
+        "line_color": "#7d95ae",
+        "line_width": 1,
+        "dash_pattern": "dash"
+      }
+    },
+    {
+      "id": "sk_1",
+      "type": "arrow_connector",
+      "from": "enc_stack",
+      "from_anchor": "right@0.5",
+      "to": "dec_stack",
+      "to_anchor": "left@0.5",
+      "route": "horizontal",
+      "style": {
+        "line_color": "#7d95ae",
+        "line_width": 1,
+        "dash_pattern": "dash"
+      }
+    },
+    {
+      "id": "sk_2",
+      "type": "arrow_connector",
+      "from": "enc_stack",
+      "from_anchor": "right@0.8",
+      "to": "dec_stack",
+      "to_anchor": "left@0.8",
+      "route": "horizontal",
+      "style": {
+        "line_color": "#7d95ae",
+        "line_width": 1,
+        "dash_pattern": "dash"
+      }
+    }
+  ],
+  "assets": []
+}

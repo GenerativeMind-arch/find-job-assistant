@@ -1,0 +1,108 @@
+# Interview assistant配置文件
+
+server:
+  host: "8.153.79.69"
+
+llm:
+  provider: "deepseek"
+  model: "deepseek-chat"
+  api_base: "https://api.deepseek.com"
+  api_key_env: "DEEPSEEK_API_KEY"
+  temperature: 0.3
+  max_tokens: 8192
+
+embedding:
+  provider: "dashscope"
+  model: "text-embedding-v4"
+  api_base: "https://dashscope.aliyuncs.com/api/v1"
+  api_key_env: "DASHSCOPE_API_KEY"
+
+rerank:
+  provider: "dashscope"
+  model: "gte-rerank-v2"
+  api_base: "https://dashscope.aliyuncs.com/api/v1"
+  api_key_env: "DASHSCOPE_API_KEY"
+  top_n: 5
+
+redis:
+  host_from: "server"          # 复用 server.host
+  port: 6379
+  db: 0
+  password: ""
+
+mysql:
+  host_from: "server"          # 复用 server.host
+  port: 3306
+  user: "root"
+  password_env: "MYSQL_PASSWORD"
+  database: "interview_assistant"
+  charset: "utf8mb4"
+  pool_size: 5
+
+langsmith:
+  tracing_v2: true
+  project: "interview-assistant"
+  api_key_env: "LANGCHAIN_API_KEY"
+  endpoint: "https://api.smith.langchain.com"
+
+fastapi:
+  host: "0.0.0.0"
+  port: 8000
+  debug: true
+  workers: 2 # workers默认值，在env中可以覆盖
+
+job_search:
+  mcp_enabled: true               # 是否启用 MCP 搜索
+  mcp_timeout: 30                 # MCP 超时（秒）
+  mcp_server_command: "npx"       # MCP Server 启动命令
+  mcp_server_args:                 # MCP Server 启动参数
+    - "-y"
+    - "mcp-jobs"
+  default_city: ""                # 默认城市（空 = 不限制）
+  fallback_to_llm: true           # MCP 失败时是否回退到 LLM 生成
+
+# ── 岗位知识库 ──────────────────────────────────────────
+
+job_knowledge:
+  enabled: true
+  chroma_collection: "job_knowledge"
+  search_top_k: 10
+  search_top_n: 5
+
+# ── RAG / 知识库 ──────────────────────────────────────────
+
+rag:
+  chunk_size: 512
+  chunk_overlap: 64
+  search_top_k: 10
+  rerank_top_n: 5
+
+knowledge_base:
+  data_directory: "/data/knowledge_base"     # 知识库源文件目录
+  chroma_persist_dir: "/data/chroma_db"      # ChromaDB 持久化目录
+  collection_name: "interview_knowledge"    # Collection 名称
+
+vector_store:
+  persist_directory: "/data/chroma_db"
+
+testing:
+  integration:
+    run_real_llm_tests: true # 是否使用真实LLM API来进行测试，开启后需要确保环境变量中有正确的API Key
+
+# ── BOSS 直聘自动化 ──────────────────────────────────────────
+# 集成自 boos-ai 项目，提供自动投递、自动沟通等功能。
+# 浏览器自动化依赖 Playwright + Firefox，需单独安装：
+#   pip install playwright && playwright install firefox
+
+boss:
+  enabled: true                    # 是否启用 Boss 自动化模块
+  headless: false                  # 浏览器是否无头模式（首次登录需 false）
+  daily_apply_limit: 15            # 每日投递上限
+  auto_reply_enabled: false        # 是否启用自动回复（需浏览器启动后生效）
+  min_reply_delay_sec: 15          # 自动回复最小延迟（秒）
+  max_reply_delay_sec: 20          # 自动回复最大延迟（秒）
+  batch_delay_min_sec: 30          # 批量投递最小间隔（秒）
+  batch_delay_max_sec: 90          # 批量投递最大间隔（秒）
+  ai_reply_style: "professional"   # AI 回复风格: professional / casual / enthusiastic
+  greeting_mode: "template"        # 招呼语模式: template / smart
+  default_city: "全国"             # 默认搜索城市
