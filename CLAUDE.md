@@ -516,5 +516,134 @@ python -m cli.cli import-job <job_url>              # 导入岗位到主工作�
 
 ---
 
+## 8. 运行与部署
+
+### 8.1 环境依赖
+
+| 依赖 | 版本要求 | 用途 |
+|------|---------|------|
+| Python | ≥ 3.10 | 后端 |
+| Node.js / npm | ≥ 18 | 前端构建 |
+| Redis | 7.0+ | 会话状态缓存（24h TTL） |
+| MySQL | 8.0+ | 持久化存储 |
+| Playwright + Firefox | `pip install playwright && playwright install firefox` | Boss 自动化（可选） |
+| ChromaDB | 1.4+ | 知识库向量存储（首次启动自动建库） |
+
+> 所有 Python 依赖见 `backend/requirements.txt`。建议使用虚拟环境：
+> `cd backend && python -m venv .venv && .venv\Scripts\activate && pip install -r requirements.txt`
+
+### 8.2 环境变量配置（backend/.env）
+
+后端通过 `backend/.env` 读取密钥与连接配置（参考根目录 `.env.docker` 模板）。**必填项**：
+
+```env
+# LLM（必填）
+DEEPSEEK_API_KEY=sk-xxx
+# 向量化 / 重排（知识库 RAG 用）
+DASHSCOPE_API_KEY=sk-xxx
+# 可观测性（可选）
+LANGCHAIN_API_KEY=lsv2_xxx
+
+# 存储连接（本地开发指向 127.0.0.1，Docker 内指向服务名）
+MYSQL_HOST=127.0.0.1
+MYSQL_PORT=3306
+MYSQL_USER=root
+MYSQL_PASSWORD=xxx
+MYSQL_DATABASE=interview_assistant
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_DB=0
+```
+
+各配置项的解析顺序：`.env` → 系统环境变量 → `config.yaml` 默认值（见 `backend/config_loader.py`）。
+
+### 8.3 数据库初始化
+
+**MySQL**（一次性）：
+```bash
+mysql -h 127.0.0.1 -u root -p < backend/sql/init_schema.sql
+```
+> 后端启动时会检查 MySQL 连通性（`SELECT 1`），MySQL 未就绪会直接退出。
+
+**Redis**：需先启动（本地或 Docker），否则后端启动检查失败。
+
+**Boss SQLite**（自动）：`backend/boss/.boss_profile/boss_state.db` 由 `init_db()` 在首次访问时自动建表，无需手动创建。
+
+### 8.4 启动后端（端口 8000）
+
+**方式一：完整启动（推荐，含依赖检查）**
+```bash
+cd backend
+python main.py            # 启动前自动检查 MySQL/Redis/知识库，通过后起 uvicorn
+```
+启动参数来自 `config.yaml` 的 `fastapi` 段（host `0.0.0.0`，port `8000`，debug 时自动 reload）。
+
+**方式二：uvicorn 直接启动（跳过依赖检查）**
+```bash
+cd backend
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+**健康检查**：`curl http://127.0.0.1:8000/health` → `{"status": "ok"}`
+
+### 8.5 启动前端
+
+**开发模式（端口 3000，代理 /api → localhost:8000）**
+```bash
+cd frontend
+npm install
+npm run dev              # 访问 http://localhost:3000
+```
+
+**生产构建（输出到 frontend/dist/，由 Nginx 托管）**
+```bash
+cd frontend
+npm run build            # 产物：frontend/dist/
+```
+> 前端代理规则见 `frontend/vite.config.js`：`/api` 和 `/health` 转发到 `http://localhost:8000`。
+
+### 8.6 Boss 直聘模块（可选）
+
+启动 Boss 功能前需额外准备：
+```bash
+pip install playwright
+playwright install firefox
+```
+
+使用流程：
+1. 前端进入「BOSS」标签页 → 点击「启动浏览器」（**首次必须非 headless**，弹出 Firefox 扫码登录）
+2. 登录态持久化在 `backend/boss/.boss_profile/`（cookie + session，重启自动恢复）
+3. 搜索岗位 → 点击「导入岗位」→ 自动切换到对话区分析该岗位
+4. 可选：设置页填写简历摘要后，启用「自动回复」或使用「AI 自动求职」
+
+> 若 `backend/config.yaml` 中 `boss.enabled: false`，`/api/boss/*` 路由仍注册但浏览器不可用。
+
+### 8.7 Docker 一键部署
+
+根目录 `docker-compose.yml` 编排 backend + frontend + mysql + redis 四服务：
+```bash
+# 准备环境变量（复制模板并按需修改密钥）
+cp .env.docker .env
+
+docker-compose up -d --build
+```
+- 后端：`http://<host>:8000`（`BACKEND_PORT`）
+- 前端：`http://<host>:3001`（`FRONTEND_PORT`，Nginx 托管 dist/）
+- MySQL / Redis 由 compose 启动，健康检查通过后 backend 才就绪
+
+> Docker 模式下 Boss 浏览器自动化不可用（容器内无 Firefox GUI），Boss 功能建议在本地开发环境使用。
+
+### 8.8 CLI（命令行）
+
+```bash
+cd backend
+python -m cli.cli status                        # 系统状态
+python -m cli.cli search "Python" --city 广州    # 搜索岗位
+python -m cli.cli agent-run "搜索岗位，只搜不投"  # Agent 自动执行
+python -m cli.cli import-job <job_url>          # 岗位导入主工作流
+```
+
+---
+
 **在线演示**: http://8.153.79.69:3001  
 **GitHub**: https://github.com/Programmergyt/interview-assistant
