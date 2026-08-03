@@ -12,7 +12,6 @@
 **Interview Assistant** 的定位是：一款 **AI 驱动的多 Agent 协作系统**，覆盖从岗位理解 → 候选人画像构建 → 简历生成与渲染 → 差距分析 → 面试准备的求职全流程。它不是简单的"ChatGPT 写简历"，而是一个有状态、有记忆、多 Agent 分工协作的求职工作站。
 
 ---
-
 ## 2. 总体功能全景
 
 ```
@@ -167,6 +166,12 @@
 
 **Agent 契约机制**：每个 Agent 声明可读字段、可写字段和禁写字段，运行时由 Plan Validator 校验，防止误写状态。
 
+> **双 Agent 系统说明（v2.0）**：项目存在两套独立的 Agent 范式，各司其职：
+> - **LangGraph 状态图**：编排面试准备全流程（JD→Gap→Resume→Interview），状态机驱动，确定性路由
+> - **AgentLoop（Boss Harness）**：驱动 Boss 直聘搜索/投递/沟通，LLM 规划→工具执行→重规划→总结，仅在用户显式触发时运行（`POST /api/boss/agent/run`）
+> 
+> 两套系统通过 `POST /api/boss/import-job` 桥接：Boss 搜到的岗位导入 `CopilotState.job`，随后触发 LangGraph 全链路分析。
+
 ### 4.2 Plan Mode 动态编排
 
 传统方案中，执行链路硬编码在 `_INTENT_PLAN` 字典里（固定映射），扩展新 Agent 需要修改核心代码。升级后的 Plan Mode 将流程提升为**可解释、可验证、可执行的 Plan 对象**：
@@ -297,17 +302,22 @@ render_config (样式配置)
 |----|---------|------|
 | 前端 | Vue 3 + Vite + Axios | 左右分栏（对话区 + 结果面板 Tabs） |
 | 后端框架 | FastAPI (Python) | 异步 API，CORS 支持 |
-| Agent 编排 | LangGraph 1.0+ | StateGraph，条件路由，多节点编排 |
+| Agent 编排 | LangGraph 1.0+（主流程）| StateGraph，条件路由，多节点编排 |
+| Agent 编排 | AgentLoop（Boss 自动化）| Plan-then-Execute，ToolRegistry + 17 工具，自定义主循环 |
 | LLM Provider | DeepSeek (deepseek-chat) | 主力生成模型，JSON 结构化输出 |
-| JD 搜索 | MCP (`mcp-jobs`) | BOSS直聘/猎聘/智联/51job 真实 JD 聚合 |
+| JD 搜索 | ChromaDB（岗位知识库）| 中文职位离线聚合 + 语义检索 |
+| 浏览器自动化 | Playwright + Firefox | Boss 直聘搜索、投递、聊天监控 |
+| 反爬机制 | ANTI_DETECT JS + 注入原生操作 | webdriver 隐藏、canvas/WebGL 指纹干扰、window.__bossApply |
 | Embedding | DashScope (text-embedding-v4) | 知识库文档向量化 |
 | Rerank | DashScope (gte-rerank-v2) | 检索结果精排，5→10 选最佳 |
 | 向量数据库 | ChromaDB 1.4+ | 轻量本地向量存储，持久化 |
 | OCR | PaddleOCR | 扫描件 PDF / 图片文字识别（中文最优） |
+| Boss SQLite | SQLite (WAL 模式) | Boss 岗位/会话/消息/设置本地持久化 |
 | 会话存储 | Redis 7.0+ | 状态缓存，24h TTL，分布式锁 |
 | 持久化 | MySQL 8.0+ | JSON 列存储，版本追踪，事件审计 |
 | 文件解析 | pdfplumber + python-docx + PyMuPDF | 多格式文档智能解析 |
 | HTML→PDF | WeasyPrint | 服务端 PDF 导出 |
+| CLI | Click + httpx + JSON 信封 | 18 条命令，stdout 纯 JSON |
 | 可观测性 | LangSmith | LLM 调用链追踪，成本统计 |
 
 ---
@@ -320,9 +330,9 @@ interview-assistant/
 │   ├── main.py                    # FastAPI 入口，启动检查
 │   ├── config.yaml                # 全局 YAML 配置
 │   ├── config_loader.py           # 配置统一访问层
-│   ├── agents/                    # Agent 实现
-│   │   ├── planner.py             #   意图分类 + 计划生成
-│   │   ├── jd_agent.py            #   JD 结构化解析
+│   ├── agents/                    # ⭐ 主流程 Agent（LangGraph 状态图编排）
+│   │   ├── planner.py             #   意图分类 + 计划生成 + Boss 导入启发式
+│   │   ├── jd_agent.py            #   JD 结构化解析（Boss 导入后跳过）
 │   │   ├── profile_agent.py       #   候选人画像提取
 │   │   ├── gap_agent.py           #   技能差距分析
 │   │   ├── content_agent.py       #   简历内容生成
@@ -341,8 +351,35 @@ interview-assistant/
 │   │       ├── plan_builder.py    #     意图 → Plan 生成
 │   │       ├── plan_validator.py  #     契约 & 冲突校验
 │   │       └── plan_executor.py   #     Step 执行引擎
+│   ├── boss/                      # ⭐ Boss 直聘自动化（Playwright + Firefox）
+│   │   ├── boss_firefox.py        #   搜索 + 详情 XHR + ANTI_DETECT 反检测 JS
+│   │   ├── boss_automation.py     #   投递（注入 JS + Playwright 混合）+ 聊天 + 风控退避
+│   │   ├── boss_state.py          #   SQLite 持久化（applications/conversations/messages）
+│   │   ├── boss_replier.py        #   AI 招呼语 + 回复生成
+│   │   ├── boss_company.py        #   公司画像聚合 + 法人识别
+│   │   ├── boss_geo.py            #   城市/区编码映射
+│   │   ├── boss_rag.py            #   历史 JD RAG 检索
+│   │   ├── manager.py             #   BossManager 单例（Playwright 单线程 + 监控循环）
+│   │   ├── interview/             #   Boss 模块内嵌 LLM 适配器
+│   │   │   └── llm_client.py      #   桥接 config_loader 统一配置
+│   │   └── agent/                 #   ★ Harness 层（Plan-then-Execute）
+│   │       ├── tools.py           #     ToolRegistry + 14 原子工具 + ToolContext
+│   │       ├── skills.py          #     3 复合技能（smart_scan/prepare_application/smart_apply）
+│   │       ├── loop.py            #     AgentLoop 主循环（规划→执行→重规划→总结）
+│   │       └── prompts.py         #     规划/重规划/总结 Prompt
+│   ├── cli/                       # ⭐ BOSS 命令行工具（python -m cli.cli）
+│   │   ├── cli.py                 #   18 条 Click 命令
+│   │   ├── client.py              #   httpx HTTP 客户端
+│   │   ├── output.py              #   JSON 信封输出
+│   │   └── schema.json            #   AI Agent 工具描述
+│   ├── api/                       # API 路由
+│   │   ├── chat.py                #   POST /api/chat 主对话端点
+│   │   ├── chat_input.py          #   消息预处理（附件解析）
+│   │   ├── resume.py              #   简历内容/渲染接口
+│   │   ├── export.py              #   导出服务（HTML/PDF/JSON/MD）
+│   │   └── boss.py                #   /api/boss/* 路由（系统控制/搜索/投递/Agent/桥接）
 │   ├── services/                  # 业务服务层
-│   │   ├── job_search.py          #   JD 搜索（MCP + LLM fallback）
+│   │   ├── job_search.py          #   JD 搜索（ChromaDB + LLM fallback）
 │   │   ├── file_classifier.py     #   文件类型智能识别
 │   │   ├── ocr_processor.py       #   PaddleOCR 封装
 │   │   ├── knowledge_base.py      #   知识库管理
@@ -351,11 +388,6 @@ interview-assistant/
 │   │   ├── llm.py                 #   LLM 工厂（多 provider）
 │   │   ├── embedding.py           #   Embedding 工厂（5 种 provider）
 │   │   └── rerank.py              #   Rerank 工厂（3 种 provider）
-│   ├── api/                       # API 路由
-│   │   ├── chat.py                #   POST /api/chat 主对话端点
-│   │   ├── chat_input.py          #   消息预处理（附件解析）
-│   │   ├── resume.py              #   简历内容/渲染接口
-│   │   └── export.py              #   导出服务（HTML/PDF/JSON/MD）
 │   ├── storage/                   # 数据访问层
 │   │   ├── redis_client.py        #   Redis 会话存储
 │   │   └── mysql_client.py        #   MySQL 持久化
@@ -408,9 +440,9 @@ interview-assistant/
 
 本项目采用 **"先显式化 Plan、再模块化 Agent、最后策略化优化"** 的渐进路线：
 
-1. **Phase 1**（当前）：新增 Plan/Step Schema 和 Agent Registry，Planner 同时生成新旧两种计划，保持向后兼容
-2. **Phase 2**（规划中）：Graph 切换到 `Planner → Executor → Respond`，Agent 完全插件化
-3. **Phase 3**（远期）：支持并行 Step、策略化执行、自适应降级
+1. **Phase 1**（已完成）：新增 Plan/Step Schema 和 Agent Registry，Planner 同时生成新旧两种计划，保持向后兼容
+2. **Phase 2**（v2.0 已完成）：引入 Boss 直聘自动化模块 + AgentLoop Harness 层（Plan-then-Execute），实现 Boss 搜索→主工作流桥接，双 Agent 系统并存（LangGraph 主流程 + AgentLoop Boss 自动化）
+3. **Phase 3**（远期）：主流程 Graph 切换为 `Planner → Executor → Respond`，Agent 完全插件化，支持并行 Step、策略化执行、自适应降级
 
 ### 6.4 数据来源标注
 
