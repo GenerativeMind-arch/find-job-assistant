@@ -233,8 +233,8 @@ def _norm_url(url: str) -> str:
 
 
 def _load_llm():
-    # backend/boss/interview 目录（与参考项目目录结构一致）
-    sys.path.insert(0, str(Path(__file__).parent.parent / "interview"))
+    # backend/boss/interview 目录（与参考项目目录结构一致），绝对路径解析
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "interview"))
     from llm_client import llm_chat_deepseek
     return llm_chat_deepseek
 

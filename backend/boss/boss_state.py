@@ -10,7 +10,8 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-DB_PATH = Path(__file__).parent / ".boss_profile" / "boss_state.db"
+# 使用绝对路径，避免随工作目录变化导致 SQLite 数据位置漂移
+DB_PATH = Path(__file__).resolve().parent / ".boss_profile" / "boss_state.db"
 
 _local = threading.local()
 

@@ -3,6 +3,12 @@
 from pathlib import Path
 import sys
 
+# 确保 backend 目录在 sys.path（绝对路径），使 `from config_loader import ...`、
+# `from api.chat import ...` 等内部导入无论从哪个工作目录/入口启动都能成功。
+_BACKEND_DIR = Path(__file__).resolve().parent
+if str(_BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_DIR))
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,7 +24,7 @@ from storage.redis_client import get_redis_client
 # 初始化日志
 setup_logging()
 logger = get_logger("app")
-BACKEND_DIR = Path(__file__).resolve().parent
+BACKEND_DIR = _BACKEND_DIR
 
 app = FastAPI(
     title="Interview Assistant",

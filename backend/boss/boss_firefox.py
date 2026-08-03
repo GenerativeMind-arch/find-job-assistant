@@ -14,7 +14,6 @@ BOSS直聘 岗位采集工具
 
 import argparse
 import csv
-import io
 import json
 import os
 import random
@@ -64,8 +63,13 @@ from urllib.parse import quote_plus
 
 from playwright.sync_api import sync_playwright
 
-# Windows 编码修复
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+# Windows 编码修复：用 reconfigure 在原对象上修改，避免替换 sys.stdout 引用
+# 导致旧 wrapper 被 GC 关闭底层 buffer（Python 3.12 / Windows 下 I/O operation on closed file）。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 # ── 配置 ──
 TODAY = date.today().isoformat()
@@ -142,8 +146,9 @@ CITIES = {
 }
 
 OUTPUT_DIR = Path.home() / "AI" / "岗位日报"
-STATE_FILE = Path(__file__).parent / ".boss_profile" / "firefox_state.json"
-PROFILE_DIR = Path(__file__).parent / ".boss_profile" / "firefox_user_data"
+# 使用绝对路径，登录态持久化位置不随工作目录变化
+STATE_FILE = Path(__file__).resolve().parent / ".boss_profile" / "firefox_state.json"
+PROFILE_DIR = Path(__file__).resolve().parent / ".boss_profile" / "firefox_user_data"
 
 ANTI_DETECT = """
 // ── 核心：隐藏 webdriver 标记 ──

@@ -7,7 +7,13 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent / "interview"))
+# 复用 interview/llm_client.py；同时确保本目录（backend/boss）在 sys.path，
+# 使 `from boss_state import ...` 在任意入口导入时都能找到兄弟模块。
+_BOSS_DIR = Path(__file__).resolve().parent
+for _p in (str(_BOSS_DIR), str(_BOSS_DIR / "interview")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 from llm_client import get_embedding
 
 from boss_state import get_all_job_embeddings, save_job_embedding, get_application_by_url

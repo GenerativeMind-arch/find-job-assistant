@@ -9,10 +9,14 @@ import re
 import sys
 from pathlib import Path
 
-# 复用 interview/llm_client.py
-sys.path.insert(0, str(Path(__file__).parent / "interview"))
-from llm_client import llm_chat_deepseek
+# 复用 interview/llm_client.py；同时确保本目录（backend/boss）在 sys.path，
+# 使 `from boss_state import ...` 在任意入口导入时都能找到兄弟模块。
+_BOSS_DIR = Path(__file__).resolve().parent
+for _p in (str(_BOSS_DIR), str(_BOSS_DIR / "interview")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
+from llm_client import llm_chat_deepseek
 from boss_state import get_recent_messages, get_setting
 import httpx
 
