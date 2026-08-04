@@ -49,6 +49,7 @@
       :class="{ 'is-hidden-mobile': activePanel !== 'result' }"
     >
       <ResultPanel
+        ref="resultPanelRef"
         :session-id="sessionId"
         :job="job"
         :gaps="gaps"
@@ -65,7 +66,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, nextTick, onMounted, onUnmounted } from 'vue'
 import ChatPanel from './components/ChatPanel.vue'
 import ResultPanel from './components/ResultPanel.vue'
 import { sendChat } from './api/index.js'
@@ -75,6 +76,7 @@ const loading = ref(false)
 const activePanel = ref('chat')
 const messages = ref([])
 const dividerRef = ref(null)
+const resultPanelRef = ref(null)
 
 // Resizable panels
 const chatWidth = ref('50%')
@@ -178,6 +180,14 @@ function applyResponse(data) {
   if (data.resume_html) resumeHtml.value = data.resume_html
   if (data.interview_qa) interviewQa.value = data.interview_qa
   if (data.triggered_agents) triggeredAgents.value = data.triggered_agents
+
+  // 模拟面试触发：自动切换到「面试」标签页
+  if (data.triggered_agents?.includes('interview_trigger')) {
+    activePanel.value = 'result'
+    nextTick(() => {
+      resultPanelRef.value?.setTab('interview')
+    })
+  }
 }
 
 /** Boss 岗位导入工作流后：切换对话面板、写入 job、自动触发分析流水线。 */

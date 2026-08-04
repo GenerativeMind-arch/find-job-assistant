@@ -179,6 +179,40 @@ export function bossImportJob(jobUrl, sessionId = '') {
   return bossApi.post('/import-job', { job_url: jobUrl, session_id: sessionId })
 }
 
+// ══════════════════════════════════════
+//  模拟面试 API
+// ══════════════════════════════════════
+
+const interviewApi = axios.create({
+  baseURL: '/api/interview',
+  timeout: 120000,
+  headers: { 'Content-Type': 'application/json' },
+})
+
+/** POST /api/interview/start — 开始模拟面试 */
+export function interviewStart(sessionId) {
+  return interviewApi.post('/start', { session_id: sessionId })
+}
+
+/** POST /api/interview/chat — 提交回答（文字或语音） */
+export function interviewChat(sessionId, answer = '', audioBase64 = '') {
+  return interviewApi.post('/chat', {
+    session_id: sessionId,
+    answer,
+    audio_base64: audioBase64 || null,
+  })
+}
+
+/** POST /api/interview/end — 结束面试，获取综合评价 */
+export function interviewEnd(sessionId) {
+  return interviewApi.post('/end', { session_id: sessionId })
+}
+
+/** POST /api/interview/transcribe — 独立语音转文字 */
+export function interviewTranscribe(audioBase64) {
+  return interviewApi.post('/transcribe', { audio_base64: audioBase64 })
+}
+
 /** GET /api/boss/agent/tools — Agent 工具列表 */
 export function bossAgentTools() {
   return bossApi.get('/agent/tools')
