@@ -575,11 +575,21 @@ backend/api/interview.py   POST /api/interview/start|chat|end|transcribe
 
 面试状态存 Redis（`session:{session_id}:interview`，TTL 2 小时）。
 
+### 8.5 前端交互
+
+`frontend/src/components/tabs/InterviewPanel.vue` 提供完整模拟面试界面：
+
+- **入口**：对话区说"开始模拟面试"→ App.vue 检测 `interview_trigger` → 自动切到「面试」标签页；或手动点「开始面试」
+- **四阶段**：idle（未开始）→ starting（生成题目）→ active（逐题作答）→ done（综合评价）
+- **作答方式**：文字输入或麦克风录音（`utils/recorder.js` 用 Web Audio API 采集 PCM 编码为 WAV base64，兼容 qwen-audio-turbo）
+- **即时反馈**：每题提交后显示 Judge 四维度评分条形图 + 优点/不足/建议
+- **结束**：5 题答完自动生成综合评价（强项/弱项标签 + 学习建议）
+
 ---
 
 ## 9. 运行与部署
 
-### 8.1 环境依赖
+### 9.1 环境依赖
 
 | 依赖 | 版本要求 | 用途 |
 |------|---------|------|
@@ -593,7 +603,7 @@ backend/api/interview.py   POST /api/interview/start|chat|end|transcribe
 > 所有 Python 依赖见 `backend/requirements.txt`。建议使用虚拟环境：
 > `cd backend && python -m venv .venv && .venv\Scripts\activate && pip install -r requirements.txt`
 
-### 8.2 环境变量配置（backend/.env）
+### 9.2 环境变量配置（backend/.env）
 
 后端通过 `backend/.env` 读取密钥与连接配置（参考根目录 `.env.docker` 模板）。**必填项**：
 
@@ -618,7 +628,7 @@ REDIS_DB=0
 
 各配置项的解析顺序：`.env` → 系统环境变量 → `config.yaml` 默认值（见 `backend/config_loader.py`）。
 
-### 8.3 数据库初始化
+### 9.3 数据库初始化
 
 **MySQL**（一次性）：
 ```bash
@@ -630,7 +640,7 @@ mysql -h 127.0.0.1 -u root -p < backend/sql/init_schema.sql
 
 **Boss SQLite**（自动）：`backend/boss/.boss_profile/boss_state.db` 由 `init_db()` 在首次访问时自动建表，无需手动创建。
 
-### 8.4 启动后端（端口 8000）
+### 9.4 启动后端（端口 8000）
 
 **方式一：完整启动（推荐，含依赖检查）**
 ```bash
@@ -647,7 +657,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 **健康检查**：`curl http://127.0.0.1:8000/health` → `{"status": "ok"}`
 
-### 8.5 启动前端
+### 9.5 启动前端
 
 **开发模式（端口 3000，代理 /api → localhost:8000）**
 ```bash
@@ -663,7 +673,7 @@ npm run build            # 产物：frontend/dist/
 ```
 > 前端代理规则见 `frontend/vite.config.js`：`/api` 和 `/health` 转发到 `http://localhost:8000`。
 
-### 8.6 Boss 直聘模块（可选）
+### 9.6 Boss 直聘模块（可选）
 
 启动 Boss 功能前需额外准备：
 ```bash
@@ -679,7 +689,7 @@ playwright install firefox
 
 > 若 `backend/config.yaml` 中 `boss.enabled: false`，`/api/boss/*` 路由仍注册但浏览器不可用。
 
-### 8.7 Docker 一键部署
+### 9.7 Docker 一键部署
 
 根目录 `docker-compose.yml` 编排 backend + frontend + mysql + redis 四服务：
 ```bash
@@ -694,7 +704,7 @@ docker-compose up -d --build
 
 > Docker 模式下 Boss 浏览器自动化不可用（容器内无 Firefox GUI），Boss 功能建议在本地开发环境使用。
 
-### 8.8 CLI（命令行）
+### 9.8 CLI（命令行）
 
 ```bash
 cd backend
