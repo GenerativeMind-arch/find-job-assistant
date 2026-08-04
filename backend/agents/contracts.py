@@ -86,19 +86,12 @@ _CONTRACTS: dict[str, AgentContract] = {
         allowed_writes=["render_config", "resume_html"],
         forbidden_writes=["job", "candidate_profile", "resume_content_json", "interview_qa"],
     ),
-    "interview_agent": AgentContract(
-        name="interview_agent",
-        description="生成面试问答集（可 RAG 增强）",
-        allowed_reads=["job", "candidate_profile", "resume_content_json"],
-        allowed_writes=["interview_qa"],
-        forbidden_writes=["resume_html", "render_config", "job", "candidate_profile", "resume_content_json"],
-    ),
-    "question_agent": AgentContract(
-        name="question_agent",
-        description="基于当前 State 回答自由问题（可 RAG 增强）",
-        allowed_reads=["*"],  # 读取所有业务字段
-        allowed_writes=[],     # 只写 workflow_trace，不写业务字段
-        forbidden_writes=["job", "candidate_profile", "resume_content_json", "render_config", "resume_html", "interview_qa", "gaps", "questions_to_ask"],
+    "interview_trigger": AgentContract(
+        name="interview_trigger",
+        description="模拟面试引导节点（真正的交互式面试由 /api/interview/* 端点驱动）",
+        allowed_reads=["job"],
+        allowed_writes=[],
+        forbidden_writes=["resume_html", "render_config", "job", "candidate_profile", "resume_content_json", "interview_qa"],
     ),
 }
 

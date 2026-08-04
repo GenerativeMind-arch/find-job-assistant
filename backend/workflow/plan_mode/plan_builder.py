@@ -16,15 +16,17 @@ logger = get_logger("agent")
 # ── Intent → Agent 映射 ─────────────────────────────────────────
 
 _INTENT_TO_AGENTS: dict[str, list[str]] = {
-    "upload_jd": ["jd_agent", "gap_agent", "content_agent", "render_agent", "interview_agent"],
-    "upload_profile": ["profile_agent", "content_agent", "render_agent", "interview_agent"],
+    "upload_jd": ["jd_agent", "gap_agent", "content_agent", "render_agent"],
+    "upload_profile": ["profile_agent", "content_agent", "render_agent"],
     "search_jd": [],                    # 特殊处理：先搜索展示
+    "import_boss_job": ["gap_agent", "content_agent", "render_agent"],
     "gap_analysis": ["gap_agent"],
     "content_edit": ["content_agent", "render_agent"],
     "render_edit": ["render_agent"],
-    "search_knowledge": ["question_agent"],
+    "search_knowledge": [],             # 内联处理：RAG + LLM 直接回答
+    "interview_start": ["interview_trigger"],
     "export": [],
-    "ask_question": ["question_agent"],
+    "ask_question": [],                 # 内联处理
 }
 
 # ── Agent 读写声明 ───────────────────────────────────────────────
@@ -55,15 +57,10 @@ _AGENT_RW: dict[str, dict] = {
         "writes": ["render_config", "resume_html"],
         "forbidden": ["job", "candidate_profile", "resume_content_json", "interview_qa"],
     },
-    "interview_agent": {
-        "reads": ["job", "candidate_profile", "resume_content_json"],
-        "writes": ["interview_qa"],
-        "forbidden": ["resume_html", "render_config", "render_config"],
-    },
-    "question_agent": {
-        "reads": ["*"],                # 读取所有业务字段
-        "writes": [],                  # 只写 workflow_trace
-        "forbidden": ["job", "candidate_profile", "resume_content_json", "render_config", "resume_html", "interview_qa"],
+    "interview_trigger": {
+        "reads": ["job"],               # 只检查前置条件
+        "writes": [],                   # 只写 workflow_trace / reply_message
+        "forbidden": ["candidate_profile", "resume_content_json", "render_config", "resume_html", "interview_qa"],
     },
 }
 
@@ -184,6 +181,6 @@ class PlanBuilder:
             # Render Agent：无 resume_content → 跳过
             if name == "render_agent" and not has_resume:
                 step.preconditions.append("SKIP: resume_content_json missing")
-            # Interview Agent：三项缺一不可
-            if name == "interview_agent" and (not has_job or not has_profile or not has_resume):
-                step.preconditions.append("SKIP: incomplete state")
+            # Interview Trigger：无 JD → 跳过（引导用户先提供岗位）
+            if name == "interview_trigger" and not has_job:
+                step.preconditions.append("SKIP: job missing")

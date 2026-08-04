@@ -61,15 +61,13 @@ def register_all():
     from agents.gap_agent import gap_node_async
     from agents.content_agent import content_node_async
     from agents.render_agent import render_node_async
-    from agents.interview_agent import interview_node_async
-    from agents.question_agent import question_node_async
+    from agents.interview_trigger import interview_trigger_node_async
 
     AgentRegistry.register("jd_agent", jd_node_async)
     AgentRegistry.register("profile_agent", profile_node_async)
     AgentRegistry.register("gap_agent", gap_node_async)
     AgentRegistry.register("content_agent", content_node_async)
     AgentRegistry.register("render_agent", render_node_async)
-    AgentRegistry.register("interview_agent", interview_node_async)
-    AgentRegistry.register("question_agent", question_node_async)
+    AgentRegistry.register("interview_trigger", interview_trigger_node_async)
 
     logger.info("All agents registered: %s", AgentRegistry.list_all())

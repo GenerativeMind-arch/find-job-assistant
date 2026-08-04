@@ -21,8 +21,7 @@ from agents.profile_agent import profile_node_async
 from agents.gap_agent import gap_node_async
 from agents.content_agent import content_node_async
 from agents.render_agent import render_node_async
-from agents.interview_agent import interview_node_async
-from agents.question_agent import question_node_async
+from agents.interview_trigger import interview_trigger_node_async
 from log import get_logger
 
 logger = get_logger("agent")
@@ -78,9 +77,7 @@ def _route_after_content(state: CopilotState) -> str:
 
 
 def _route_after_render(state: CopilotState) -> str:
-    plan = state.execution_plan
-    if "interview_agent" in plan:
-        return "interview_agent"
+    """Render 完成后直接 respond（interview_agent 已被交互式模拟面试替代）。"""
     return "respond"
 
 
@@ -139,8 +136,7 @@ def build_graph() -> StateGraph:
     graph.add_node("gap_agent", gap_node_async)
     graph.add_node("content_agent", content_node_async)
     graph.add_node("render_agent", render_node_async)
-    graph.add_node("interview_agent", interview_node_async)
-    graph.add_node("question_agent", question_node_async)
+    graph.add_node("interview_trigger", interview_trigger_node_async)
     graph.add_node("respond", _respond)
 
     # 入口
@@ -153,8 +149,7 @@ def build_graph() -> StateGraph:
         "gap_agent": "gap_agent",
         "content_agent": "content_agent",
         "render_agent": "render_agent",
-        "interview_agent": "interview_agent",
-        "question_agent": "question_agent",
+        "interview_trigger": "interview_trigger",
         "respond": "respond",
     })
 
@@ -183,17 +178,11 @@ def build_graph() -> StateGraph:
         "respond": "respond",
     })
 
-    # Render Agent → Interview or Respond
-    graph.add_conditional_edges("render_agent", _route_after_render, {
-        "interview_agent": "interview_agent",
-        "respond": "respond",
-    })
+    # Render Agent → Respond（interview_agent 已被交互式模拟面试 API 替代）
+    graph.add_edge("render_agent", "respond")
 
-    # Interview Agent → Respond
-    graph.add_edge("interview_agent", "respond")
-
-    # Question Agent → Respond
-    graph.add_edge("question_agent", "respond")
+    # Interview Trigger → Respond
+    graph.add_edge("interview_trigger", "respond")
 
     # Respond → END
     graph.add_edge("respond", END)

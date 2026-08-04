@@ -24,18 +24,19 @@ logger = get_logger("agent")
 # 实际执行计划由 _build_execution_plan 根据 state 动态调整
 _INTENT_PLAN: dict[str, list[str]] = {
     # 数据输入类
-    "upload_jd": ["jd_agent", "gap_agent", "content_agent", "render_agent", "interview_agent"],
-    "upload_profile": ["profile_agent", "content_agent", "render_agent", "interview_agent"],
+    "upload_jd": ["jd_agent", "gap_agent", "content_agent", "render_agent"],
+    "upload_profile": ["profile_agent", "content_agent", "render_agent"],
     "search_jd": [],                                    # 特殊处理：先搜索展示结果，用户选择后再执行 pipeline
-    "import_boss_job": ["gap_agent", "content_agent", "render_agent", "interview_agent"],  # Boss 导入岗位，job 已解析，跳过 jd_agent
+    "import_boss_job": ["gap_agent", "content_agent", "render_agent"],  # Boss 导入岗位，job 已解析，跳过 jd_agent
     # 分析与生成类
     "gap_analysis": ["gap_agent"],
     "content_edit": ["content_agent", "render_agent"],
     "render_edit": ["render_agent"],
     # 查询与导出类
-    "search_knowledge": ["question_agent"],              # 知识库查询走 question_agent（带 RAG 增强）
+    "search_knowledge": [],                             # 内联处理：RAG 检索 + LLM 直接回答
+    "interview_start": ["interview_trigger"],           # 模拟面试引导节点
     "export": [],
-    "ask_question": ["question_agent"],
+    "ask_question": [],                                 # 内联处理：基于 state + RAG 直接回答
 }
 
 
@@ -136,9 +137,10 @@ def _build_execution_plan(intent: str, secondary: list[str], state: CopilotState
         # 搜索阶段不跑 Agent，由 planner 直接调用 JobSearchService
         return []
 
-    # ── search_knowledge ──
-    if intent == "search_knowledge":
-        return ["question_agent"]
+    # ── 内联意图（ask_question / search_knowledge）──
+    if intent in ("ask_question", "search_knowledge"):
+        # 由 planner 内联处理（RAG + LLM 直接回答），不路由 agent
+        return []
 
     # ── import_boss_job 条件分支 ──
     if intent == "import_boss_job":
@@ -306,13 +308,70 @@ async def _handle_search_jd(state: CopilotState) -> dict[str, Any]:
     }
 
 
+async def _handle_free_question(state: CopilotState, intent: str) -> dict[str, Any]:
+    """内联处理自由问答（ask_question / search_knowledge）。
+
+    原 question_agent 节点已被交互式模拟面试替代，自由问答能力
+    改为在 planner 内联实现：RAG 知识库检索 + LLM 直接回答。
+    """
+    from services.knowledge_base import KnowledgeBase
+    from models.llm import get_llm, _ainvoke_model, _extract_text_content
+
+    # 1. RAG 知识库检索
+    knowledge_context = ""
+    try:
+        if intent == "search_knowledge":
+            knowledge_context = await KnowledgeBase.search(state.user_message, top_n=3)
+        else:
+            knowledge_context = await KnowledgeBase.search(state.user_message, top_n=3)
+    except Exception as exc:
+        logger.warning("Knowledge search failed: %s", exc)
+
+    system_prompt = (
+        "你是一个职业助手问答专家。你可以读取工作流当前的岗位、简历等信息，并用自然语言回答用户问题。\n"
+        "回答要求：\n"
+        "- 优先依据提供的上下文回答，不要编造\n"
+        "- 如果提供了「知识库参考」，说明该信息来自真实面试经验数据库，请参考其内容回答\n"
+        "- 回答要直接、自然，使用中文\n"
+    )
+    user_prompt = f"用户问题：\n{state.user_message}"
+    if state.job and state.job.title:
+        user_prompt += f"\n\n当前目标岗位：{state.job.title}"
+    if knowledge_context:
+        user_prompt += f"\n\n知识库参考：\n{knowledge_context}"
+
+    llm = get_llm()
+    try:
+        response = await _ainvoke_model(
+            llm, [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
+        )
+        answer = _extract_text_content(response) or "我暂时无法回答这个问题。"
+    except Exception as exc:
+        logger.error("Free question LLM failed: %s", exc)
+        answer = "我暂时无法回答这个问题，请稍后重试。"
+
+    return {
+        "reply_message": answer,
+        "current_intent": intent,
+        "execution_plan": [],
+        "triggered_agents": [],
+        "workflow_trace": append_trace(
+            state,
+            node="planner",
+            input_summary=f"自由问答：{summarize_user_message(state.user_message)}",
+            output_summary=answer,
+            artifacts={"intent": intent, "answer_length": len(answer)},
+        ),
+    }
+
+
 async def planner_node_async(state: CopilotState) -> dict[str, Any]:
     """Planner Agent 异步节点函数。
 
     职责：
     1. 意图分类（支持复合意图）
     2. 构建执行计划
-    3. 特殊意图处理（search_jd 搜索、search_knowledge RAG 查询）
+    3. 特殊意图处理（search_jd 搜索、search_knowledge/ask_question 内联问答）
     """
     logger.info("Planner Agent started for session %s", state.session_id)
 
@@ -361,6 +420,10 @@ async def planner_node_async(state: CopilotState) -> dict[str, Any]:
     # ── search_jd 特殊处理：搜索 JD 并返回结果 ──
     if primary == "search_jd":
         return await _handle_search_jd(state)
+
+    # ── 自由问答 / 知识库查询：内联处理（原 question_agent 已移除）──
+    if primary in ("ask_question", "search_knowledge"):
+        return await _handle_free_question(state, primary)
 
     # 2. 构建执行计划
     plan = _build_execution_plan(primary, secondary, state)

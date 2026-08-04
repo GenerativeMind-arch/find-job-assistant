@@ -83,3 +83,24 @@ class RedisSessionStore:
 
     async def release_lock(self) -> None:
         await self._client.delete(self._lock_key())
+
+    # ---- interview session ----
+    def _interview_key(self) -> str:
+        return f"session:{self.session_id}:interview"
+
+    async def save_interview_state(self, state: dict) -> None:
+        """保存面试会话状态（TTL 2 小时）。"""
+        key = self._interview_key()
+        await self._client.set(key, json.dumps(state, ensure_ascii=False, default=str), ex=self.ttl)
+
+    async def load_interview_state(self) -> dict | None:
+        """加载面试会话状态。"""
+        key = self._interview_key()
+        data = await self._client.get(key)
+        if data is None:
+            return None
+        return json.loads(data)
+
+    async def delete_interview_state(self) -> None:
+        """删除面试会话状态。"""
+        await self._client.delete(self._interview_key())

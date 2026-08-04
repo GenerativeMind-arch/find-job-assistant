@@ -50,7 +50,7 @@
 | **智能简历生成** | 基于 JD + 候选人画像，用 LLM 生成 STAR 风格、关键词对齐的简历内容 |
 | **HTML 简历渲染** | 将结构化简历 JSON 渲染为专业排版的 HTML，支持主题切换、布局调整 |
 | **差距分析与追问** | 对比岗位要求与候选人能力，找出技能缺口并主动追问缺失信息 |
-| **面试问答准备** | 基于岗位 + 画像 + 简历，生成技术面 / 项目深挖 / 行为面试的问答集，并可接入 RAG 知识库增强（真实面经） |
+| **交互式模拟面试** | 一问一答模拟面试：基于岗位 + 简历 + 知识库生成 5 道题，支持文字/语音作答，Judge Agent 四维度评分 + 综合评价 |
 
 ---
 
@@ -152,17 +152,14 @@
                   └────────┬──────────┘
                            │
                   ┌────────▼──────────┐
-                  │  Interview Agent  │
-                  │  ─────────────── │
-                  │  面试问答生成     │
-                  │  ← RAG 知识库增强 │
-                  └────────┬──────────┘
-                           │
-                  ┌────────▼──────────┐
                   │  Respond 节点     │
                   │  生成最终回复     │
                   └───────────────────┘
 ```
+
+> **模拟面试不在 LangGraph 图内**：用户说"开始模拟面试"时，Planner 路由到
+> `interview_trigger` 节点（仅引导），真正的交互式面试由独立的
+> `POST /api/interview/*` 端点驱动（一问一答 + Judge 评分 + 语音输入）。
 
 **Agent 契约机制**：每个 Agent 声明可读字段、可写字段和禁写字段，运行时由 Plan Validator 校验，防止误写状态。
 
@@ -337,8 +334,13 @@ interview-assistant/
 │   │   ├── gap_agent.py           #   技能差距分析
 │   │   ├── content_agent.py       #   简历内容生成
 │   │   ├── render_agent.py        #   HTML 简历渲染
-│   │   ├── interview_agent.py     #   面试问答生成
-│   │   ├── question_agent.py      #   自由问答
+│   │   ├── interview_trigger.py   #   模拟面试引导节点
+│   │   ├── interview/             #   ★ 交互式模拟面试模块
+│   │   │   ├── engine.py          #     InterviewEngine（start→chat→end）
+│   │   │   ├── judge.py           #     Judge Agent（四维度评分）
+│   │   │   ├── audio.py           #     语音转文字（qwen-audio-turbo）
+│   │   │   ├── contracts.py       #     面试数据模型
+│   │   │   └── prompts.py         #     出题/面试官/Judge/总结 Prompt
 │   │   ├── json_contracts.py      #   LLM 输出 Pydantic Schema
 │   │   ├── registry.py            #   Agent 注册中心
 │   │   └── contracts.py           #   Agent 契约声明
@@ -491,7 +493,7 @@ backend/
 Boss 搜索 → 点击"导入岗位" → import-job 写入 Redis state
     → 前端切换对话区 + 自动发送"分析这个岗位"
     → Planner 启发式识别 boss_ 前缀 → import_boss_job 意图
-    → gap_agent → content_agent → render_agent → interview_agent（跳过 jd_agent，job 已预置解析）
+    → gap_agent → content_agent → render_agent（跳过 jd_agent，job 已预置解析）
 ```
 
 ### 7.4 反爬机制（已完整迁移）
@@ -516,7 +518,66 @@ python -m cli.cli import-job <job_url>              # 导入岗位到主工作�
 
 ---
 
-## 8. 运行与部署
+## 8. 交互式模拟面试（v2.1 新增）
+
+### 8.1 定位
+
+替代原 `interview_agent`（批量题库生成）和 `question_agent`（自由问答），提供**一问一答的交互式模拟面试**：
+基于岗位 + 简历 + 知识库生成 5 道题，逐个作答，Judge Agent 逐题评分，最后生成综合评价（强项/弱项/学习建议）。
+
+**架构决策**：交互式面试走**独立 REST API**（`POST /api/interview/*`），不走 LangGraph 图。
+原因是 LangGraph 是单次 DAG（从入口到 END 一次执行），而模拟面试是多轮会话（5 次 HTTP 请求，每轮积累状态）。
+LangGraph 图中仅保留 `interview_trigger` 引导节点。
+
+### 8.2 数据流
+
+```
+用户: "开始模拟面试"
+  → POST /api/chat → Planner 分类 interview_start
+  → interview_trigger 节点（返回引导语）
+  → 前端切换到 POST /api/interview/start
+
+POST /api/interview/start
+  → 快照 job/resume/profile → RAG 检索 → LLM 生成 5 题
+  → 返回第 1 题
+
+POST /api/interview/chat { answer, audio_base64? }
+  → 有语音则 qwen-audio-turbo 转文字
+  → Judge Agent 四维度评分
+  → 返回评分 + 下一题
+
+... 重复 5 轮 ...
+
+POST /api/interview/end
+  → 综合评分 + 强项/弱项 + 学习建议
+```
+
+### 8.3 模块结构
+
+```
+backend/agents/interview/
+├── engine.py       InterviewEngine（start→chat→end、出题、轮次管理）
+├── judge.py        Judge Agent（准确性/深度/表达/匹配度 四维度 0-10 分）
+├── audio.py        语音转文字（DashScope qwen-audio-turbo）
+├── contracts.py    Pydantic 数据模型
+└── prompts.py      出题 / 面试官 / Judge / 总结 Prompt
+backend/api/interview.py   POST /api/interview/start|chat|end|transcribe
+```
+
+### 8.4 API 契约
+
+| 端点 | 请求 | 响应要点 |
+|------|------|---------|
+| `POST /api/interview/start` | `{session_id}` | `{round, total_rounds, message, question}` |
+| `POST /api/interview/chat` | `{session_id, answer, audio_base64?}` | `{judge, next_question, is_last}` |
+| `POST /api/interview/end` | `{session_id}` | `{avg_score, strong_areas, weak_areas, summary, recommendations}` |
+| `POST /api/interview/transcribe` | `{audio_base64}` | `{text}` |
+
+面试状态存 Redis（`session:{session_id}:interview`，TTL 2 小时）。
+
+---
+
+## 9. 运行与部署
 
 ### 8.1 环境依赖
 

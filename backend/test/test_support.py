@@ -232,8 +232,6 @@ def patch_all_agent_llm(monkeypatch, llm: PromptRouterLLM) -> None:
     import agents.gap_agent as gap_agent
     import agents.content_agent as content_agent
     import agents.render_agent as render_agent
-    import agents.interview_agent as interview_agent
-    import agents.question_agent as question_agent
 
     monkeypatch.setattr(planner, "get_llm", lambda: llm)
     monkeypatch.setattr(jd_agent, "get_llm", lambda: llm)
@@ -241,8 +239,6 @@ def patch_all_agent_llm(monkeypatch, llm: PromptRouterLLM) -> None:
     monkeypatch.setattr(gap_agent, "get_llm", lambda: llm)
     monkeypatch.setattr(content_agent, "get_llm", lambda: llm)
     monkeypatch.setattr(render_agent, "get_llm", lambda: llm)
-    monkeypatch.setattr(interview_agent, "get_llm", lambda: llm)
-    monkeypatch.setattr(question_agent, "get_llm", lambda: llm)
 
 
 def ensure_langsmith_enabled() -> str | None:
