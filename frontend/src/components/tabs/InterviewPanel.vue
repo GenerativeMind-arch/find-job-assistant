@@ -90,6 +90,22 @@
         <span class="score-label">平均分 / 10</span>
       </div>
 
+      <!-- 逐题评分明细（全部答完后统一展示） -->
+      <div v-if="detailedScores.length" class="summary-section">
+        <h4>📊 逐题评分</h4>
+        <div class="detail-list">
+          <div v-for="d in detailedScores" :key="d.round" class="detail-item">
+            <div class="detail-head">
+              <span class="detail-round">第 {{ d.round }} 题（{{ d.category }}）</span>
+              <span class="detail-score">{{ d.score }}/10</span>
+            </div>
+            <p class="detail-q">{{ d.question }}</p>
+            <p v-if="d.strength" class="detail-txt strong">✅ {{ d.strength }}</p>
+            <p v-if="d.weakness" class="detail-txt weak">⚠️ {{ d.weakness }}</p>
+          </div>
+        </div>
+      </div>
+
       <div v-if="strongAreas.length" class="summary-section">
         <h4>✅ 你的强项</h4>
         <div class="tag-list">
@@ -145,6 +161,7 @@ const lastJudge = ref(null)
 const lastRound = ref(0)
 const isLast = ref(false)
 const avgScore = ref('')
+const detailedScores = ref([])
 const strongAreas = ref([])
 const weakAreas = ref([])
 const summary = ref('')
@@ -200,7 +217,8 @@ async function submitAnswer() {
 
   try {
     const { data } = await interviewChat(props.sessionId, answer, audioBase64)
-    lastJudge.value = data.judge
+    // 统一评分：中间轮次不返回 judge（null），直接进入下一题
+    lastJudge.value = data.judge || null
     lastRound.value = data.round
     isLast.value = data.is_last
     if (data.next_question) {
@@ -208,7 +226,7 @@ async function submitAnswer() {
       currentRound.value = data.round
     }
     if (data.is_last) {
-      // 自动结束，拉取综合报告
+      // 全部答完，拉取综合报告（含逐题评分）
       await fetchSummary()
     }
     if (transcribeNote.value) transcribeNote.value = ''
@@ -224,6 +242,7 @@ async function fetchSummary() {
   try {
     const { data } = await interviewEnd(props.sessionId)
     avgScore.value = data.avg_score || 0
+    detailedScores.value = data.detailed_scores || []
     strongAreas.value = data.strong_areas || []
     weakAreas.value = data.weak_areas || []
     summary.value = data.summary || ''
@@ -272,6 +291,7 @@ function resetInterview() {
   answerText.value = ''
   isLast.value = false
   avgScore.value = ''
+  detailedScores.value = []
   strongAreas.value = []
   weakAreas.value = []
   summary.value = ''
@@ -485,6 +505,27 @@ onUnmounted(() => {
 .score-label { display: block; font-size: 13px; color: var(--text-light); margin-top: 4px; }
 .summary-section { text-align: left; margin: 16px 0; }
 .summary-section h4 { font-size: 14px; margin-bottom: 8px; }
+.detail-list { display: flex; flex-direction: column; gap: 8px; }
+.detail-item {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+.detail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.detail-round { color: var(--text); }
+.detail-score { color: var(--primary); font-size: 15px; }
+.detail-q { font-size: 13px; color: var(--text-secondary); margin: 2px 0 6px; line-height: 1.6; }
+.detail-txt { font-size: 12px; line-height: 1.6; margin: 2px 0; }
+.detail-txt.strong { color: #166534; }
+.detail-txt.weak { color: #991b1b; }
 .tag-list { display: flex; gap: 8px; flex-wrap: wrap; }
 .tag { padding: 4px 12px; border-radius: 999px; font-size: 12px; }
 .tag-strong { background: #dcfce7; color: #166534; }

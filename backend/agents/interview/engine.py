@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -23,6 +24,7 @@ from .contracts import (
     InterviewStartResponse,
     InterviewChatResponse,
     InterviewEndResponse,
+    JudgeOutput,
 )
 from .judge import JudgeAgent
 from .prompts import QUESTION_GENERATION_PROMPT, FINAL_SUMMARY_PROMPT
@@ -132,8 +134,9 @@ class InterviewEngine:
 
         opening = (
             f"你好！我是你的模拟面试官。今天将围绕岗位「{job_title or '你的目标岗位'}」"
-            f"进行一场 {session_state.max_rounds} 题的模拟面试，我会逐题提问，你回答后我会给出评分和反馈。\n\n"
-            f"**第 1 题（{first_q.category}）**：{first_q.question}"
+            f"进行一场 {session_state.max_rounds} 题的模拟面试，我会逐题提问，"
+            f"全部回答完毕后统一给出评分和反馈。\n\n"
+            f"{first_q.question}"
         )
 
         return InterviewStartResponse(
@@ -149,11 +152,14 @@ class InterviewEngine:
         answer: str = "",
         audio_base64: Optional[str] = None,
     ) -> InterviewChatResponse:
-        """接收一轮回答 → 评分 → 记录 → 出下一题或收尾。
+        """接收一轮回答 → 记录 → 出下一题或收尾。
 
         Args:
             answer: 用户文本回答
             audio_base64: 可选，语音音频 base64
+
+        注意：本方法不再逐题评分。回答仅暂存于 history（judge_result=None），
+        待全部题目作答完毕后由 end()/_finish() 统一评分。
         """
         # 1. 语音转文字（优先）
         if audio_base64:
@@ -176,70 +182,54 @@ class InterviewEngine:
         # 3. 取当前题
         idx = state.round_count  # 0-based
         if idx >= len(state.question_pool):
-            # 已无题可出，视为结束
-            return await self._finish(state, answer=answer)
+            # 已无题可出，视为结束（统一评分交给 end/_finish）
+            return InterviewChatResponse(
+                session_id=self.session_id,
+                round=state.round_count,
+                total_rounds=len(state.question_pool),
+                judge=None,
+                next_question=None,
+                is_last=True,
+                message="所有题目已回答完毕，请获取综合评分。",
+            )
 
         current_q = state.question_pool[idx]
 
-        # 4. 知识库检索（针对当前题）
-        kb_context = ""
-        try:
-            kb_context = await KnowledgeBase.search(f"{state.job_title} {current_q.category} {current_q.question}", top_n=3)
-        except Exception:
-            pass
-
-        # 5. Judge 评分
-        judge_result = await self.judge.evaluate(
-            question=current_q,
-            user_answer=answer,
-            job_focus=state.job_title,
-            resume_summary=self._resume_summary(state.resume_json),
-            knowledge_context=kb_context,
-        )
-
-        # 6. 记录本轮
+        # 4. 记录本轮（仅暂存答案，不评分）
         turn = InterviewTurn(
             round=idx + 1,
             question=current_q,
             user_answer=answer,
-            judge_result=judge_result,
+            judge_result=None,  # 统一评分，逐题不评
         )
         state.history.append(turn)
         state.round_count += 1
-        state.total_score += judge_result.overall_score
         state.updated_at = _now()
 
-        # 7. 判断是否最后一题
+        # 5. 判断是否最后一题
         is_last = state.round_count >= len(state.question_pool)
 
         next_q = None
         if not is_last:
             next_q = state.question_pool[state.round_count]
 
-        # 8. 持久化（每次刷新 TTL）
+        # 6. 持久化（每次刷新 TTL）
         await self.store.save_interview_state(state.model_dump())
 
-        # 9. 构造回复
+        # 7. 构造回复（逐题不返回评分）
         if is_last:
             message = (
-                f"**第 {turn.round} 题评分：{judge_result.overall_score:.1f}/10**\n\n"
-                f"✅ {judge_result.strength}\n"
-                f"⚠️ {judge_result.weakness}\n\n"
-                f"这是最后一题，面试结束！我将为你生成综合评价。"
+                f"第 {turn.round} 题回答完毕，这是最后一题。\n"
+                f"面试结束！点击「完成面试」即可查看全部题目的综合评分与评价。"
             )
         else:
-            message = (
-                f"**第 {turn.round} 题评分：{judge_result.overall_score:.1f}/10**\n\n"
-                f"✅ {judge_result.strength}\n"
-                f"⚠️ {judge_result.weakness}\n\n"
-                f"**第 {turn.round + 1} 题（{next_q.category if next_q else ''}）**：{next_q.question if next_q else ''}"
-            )
+            message = next_q.question if next_q else ""
 
         return InterviewChatResponse(
             session_id=self.session_id,
             round=state.round_count,
             total_rounds=len(state.question_pool),
-            judge=judge_result,
+            judge=None,
             next_question=next_q,
             is_last=is_last,
             message=message,
@@ -256,9 +246,27 @@ class InterviewEngine:
 
     # ── 内部方法 ──
 
-    async def _finish(self, state: InterviewSessionState, answer: str = "") -> InterviewEndResponse:
-        """生成最终综合报告并持久化。"""
-        # 1. 汇总各轮评分
+    async def _finish(self, state: InterviewSessionState) -> InterviewEndResponse:
+        """对全部回答统一评分，生成最终综合报告并持久化。"""
+        # 1. 对所有未评分轮次并行评分
+        pending = [t for t in state.history if t.judge_result is None]
+        if pending:
+            results = await asyncio.gather(
+                *(self._judge_turn(state, t) for t in pending),
+                return_exceptions=True,
+            )
+            for turn, res in zip(pending, results):
+                if isinstance(res, Exception):
+                    logger.error("Judge failed for round %s: %s", turn.round, res)
+                    turn.judge_result = JudgeOutput(
+                        overall_score=0.0,
+                        category=turn.question.category,
+                        weakness="评分失败，请稍后重试。",
+                    )
+                else:
+                    turn.judge_result = res
+
+        # 2. 汇总各轮评分
         detailed = []
         scores = []
         for turn in state.history:
@@ -278,7 +286,7 @@ class InterviewEngine:
         max_s = max(scores) if scores else 0.0
         min_s = min(scores) if scores else 0.0
 
-        # 2. 分类强弱项
+        # 3. 分类强弱项
         category_scores: dict[str, list[float]] = {}
         for turn in state.history:
             if turn.judge_result:
@@ -287,7 +295,7 @@ class InterviewEngine:
         strong = [c for c, s in category_scores.items() if (sum(s) / len(s)) >= 7.0]
         weak = [c for c, s in category_scores.items() if (sum(s) / len(s)) < 6.0]
 
-        # 3. LLM 生成综合评价
+        # 4. LLM 生成综合评价
         rounds_detail = "\n".join(
             f"- 第{t['round']}题（{t['category']}）{t['score']}/10：{t['question'][:80]}"
             for t in detailed
@@ -308,7 +316,7 @@ class InterviewEngine:
             logger.error("Interview summary generation failed: %s", exc)
             summary = f"本次模拟面试完成，平均分 {avg:.1f}/10。"
 
-        # 4. 标记结束并持久化
+        # 5. 标记结束并持久化
         state.status = "ended"
         state.updated_at = _now()
         await self.store.save_interview_state(state.model_dump())
@@ -327,6 +335,23 @@ class InterviewEngine:
             recommendations=recommendations,
         )
 
+    async def _judge_turn(self, state: InterviewSessionState, turn: InterviewTurn) -> JudgeOutput:
+        """针对单轮回答做知识库检索 + Judge 评分（用于统一评分阶段）。"""
+        kb_context = ""
+        try:
+            kb_context = await KnowledgeBase.search(
+                f"{state.job_title} {turn.question.category} {turn.question.question}", top_n=3
+            )
+        except Exception:
+            pass
+        return await self.judge.evaluate(
+            question=turn.question,
+            user_answer=turn.user_answer,
+            job_focus=state.job_title,
+            resume_summary=self._resume_summary(state.resume_json),
+            knowledge_context=kb_context,
+        )
+
     async def _generate_questions(
         self,
         job_json: str,
@@ -335,7 +360,7 @@ class InterviewEngine:
         kb_context: str,
         n: int = 5,
     ) -> list[InterviewQuestion]:
-        """LLM 生成 n 道题。"""
+        """LLM 生成 n 道题（每题内容带「第X题」编号前缀）。"""
         prompt = QUESTION_GENERATION_PROMPT.format(
             n=n,
             job_json=job_json or "{}",
@@ -351,14 +376,14 @@ class InterviewEngine:
                     id=f"q{i}",
                     category=q.category,
                     difficulty=q.difficulty,
-                    question=q.question,
+                    question=f"第{i}题：{q.question.strip()}",
                 ))
             return questions
         except Exception as exc:
             logger.error("Question generation failed: %s", exc)
             # 降级：返回 5 个通用题
             return [
-                InterviewQuestion(id=f"q{i}", category="技术", question=fallback)
+                InterviewQuestion(id=f"q{i}", category="技术", question=f"第{i}题：{fallback}")
                 for i, fallback in enumerate([
                     "请做一下自我介绍。",
                     "请讲讲你最熟悉的一个技术点，并说明它的原理。",

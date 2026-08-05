@@ -211,7 +211,17 @@ async function refreshStatus() {
 async function startBrowser() {
   loading.value = true
   try {
-    await bossStart()
+    const { data } = await bossStart()
+    // 后端对 status=error 会抛 500；这里再兜底处理 warning / already_started
+    if (data?.status === 'error') {
+      alert('启动失败: ' + (data.message || '未知错误'))
+    } else if (data?.status === 'warning') {
+      alert('提示: ' + (data.message || '浏览器已启动但登录态异常，请重新登录'))
+    } else if (data?.status === 'already_started') {
+      alert('浏览器已在运行中')
+    } else {
+      alert(data?.login_status?.logged_in ? '浏览器已启动（已登录）' : '浏览器已启动，请在弹出的窗口完成扫码登录')
+    }
     await refreshStatus()
   } catch (e) { alert('启动失败: ' + (e.response?.data?.detail || e.message)) }
   finally { loading.value = false }
@@ -221,6 +231,7 @@ async function stopBrowser() {
   loading.value = true
   try {
     await bossStop()
+    alert('浏览器已停止')
     await refreshStatus()
   } catch (e) { alert('停止失败: ' + (e.response?.data?.detail || e.message)) }
   finally { loading.value = false }
@@ -229,7 +240,12 @@ async function stopBrowser() {
 async function relogin() {
   loading.value = true
   try {
-    await bossRelogin()
+    const { data } = await bossRelogin()
+    if (data?.status === 'error') {
+      alert('登录失败: ' + (data.message || '未知错误'))
+    } else {
+      alert('已重新打开登录窗口，请在浏览器中扫码登录')
+    }
     await refreshStatus()
   } catch (e) { alert('登录失败: ' + (e.response?.data?.detail || e.message)) }
   finally { loading.value = false }

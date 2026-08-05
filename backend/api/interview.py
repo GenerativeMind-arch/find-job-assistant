@@ -2,8 +2,8 @@
 
 端点（均以 /api/interview 为前缀）：
   - POST /api/interview/start     开始一场模拟面试（生成 5 题 + 第 1 题）
-  - POST /api/interview/chat      提交回答（文本或语音），返回评分 + 下一题
-  - POST /api/interview/end       结束面试，返回综合评价
+  - POST /api/interview/chat      提交回答（文本或语音），逐题暂存不评分，返回下一题
+  - POST /api/interview/end       结束面试，对全部回答统一评分 + 返回综合评价
   - POST /api/interview/transcribe 独立语音转文字
 """
 
@@ -78,7 +78,7 @@ async def interview_start(req: InterviewStartRequest):
 
 @router.post("/chat", response_model=InterviewChatResponse)
 async def interview_chat(req: InterviewChatRequest):
-    """提交一轮回答（文本或语音），返回 Judge 评分 + 下一题。"""
+    """提交一轮回答（文本或语音），逐题暂存答案，返回下一题（不返回评分）。"""
     engine = await _get_engine(req.session_id)
     try:
         return await engine.chat(answer=req.answer, audio_base64=req.audio_base64)

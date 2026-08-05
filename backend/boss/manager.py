@@ -83,9 +83,15 @@ class BossManager:
 
         Playwright 同步 API 检测到 event loop 会拒绝运行，
         所以需要清除该线程的 asyncio 状态。
+
+        注意：uvicorn reload 模式下 worker 进程默认使用 SelectorEventLoop，
+        而 Playwright 同步 API 启动 driver 子进程依赖 ProactorEventLoop（Windows），
+        因此在 PW 线程内强制使用 WindowsProactorEventLoopPolicy。
         """
         def _wrapper():
             try:
+                if sys.platform == "win32":
+                    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
                 asyncio.set_event_loop(None)
             except Exception:
                 pass
@@ -119,9 +125,21 @@ class BossManager:
 
     # ── 系统控制 ──
 
-    async def start(self, headless: bool = False) -> dict:
-        """启动浏览器自动化 + 后台监控。"""
+    async def start(self, headless: Optional[bool] = None) -> dict:
+        """启动浏览器自动化 + 后台监控。
+
+        Args:
+            headless: 是否无头模式。None 时读取 config.yaml 的 boss.headless。
+                      首次登录（无有效登录态）必须为 False（可见浏览器扫码）。
+        """
         from boss_automation import BossAutomation
+
+        if headless is None:
+            try:
+                from config_loader import get_boss_config
+                headless = bool(get_boss_config().get("headless", False))
+            except Exception:
+                headless = False
 
         if self.automation is not None and self.automation.page is not None:
             return {"status": "already_started"}
@@ -129,13 +147,21 @@ class BossManager:
         def _do_start():
             a = BossAutomation(headless=headless)
             a.start()
+            # 导航到 BOSS 直聘：未登录时自动进入登录/扫码页，已登录则直达首页
+            try:
+                a.page.goto("https://www.zhipin.com/", wait_until="domcontentloaded", timeout=25000)
+            except Exception as _nav_e:
+                print(f"[BossManager] 启动后导航到 BOSS 直聘失败: {_nav_e}")
             return a
 
         try:
             self.automation = await self.run_pw(_do_start)
         except Exception as e:
             self.automation = None
-            return {"status": "error", "message": f"浏览器启动失败: {e}"}
+            import traceback as _tb
+            _tb.print_exc()  # 完整异常打到后端控制台，便于定位
+            msg = str(e) or repr(e) or "未知错误（详见后端控制台日志）"
+            return {"status": "error", "message": f"浏览器启动失败: {msg}"}
 
         if self.automation is None or self.automation.page is None:
             self.automation = None

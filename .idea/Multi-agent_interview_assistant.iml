@@ -5,6 +5,7 @@
       <sourceFolder url="file://$MODULE_DIR$" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/backend" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/.venv" />
+      <excludeFolder url="file://$MODULE_DIR$/boss_ai_reference/boos-ai/.venv" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.12 (Multi-agent interview assistant) (2)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />

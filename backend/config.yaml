@@ -96,7 +96,12 @@ testing:
 
 boss:
   enabled: true                    # 是否启用 Boss 自动化模块
-  headless: false                  # 浏览器是否无头模式（首次登录需 false）
+  # 浏览器是否无头模式（即是否隐藏浏览器窗口）
+  #  - false（推荐/默认）：弹出可见浏览器窗口，可扫码登录、手动查看操作过程
+  #  - true：隐藏浏览器（无人值守自动化，需先完成过一次登录、profile 已保存登录态）
+  # 首次登录必须为 false。前端「启动浏览器」始终以可见模式打开，不受此值影响；
+  # 此值仅作用于 CLI / Agent 等未显式指定 headless 的启动路径。
+  headless: false
   daily_apply_limit: 15            # 每日投递上限
   auto_reply_enabled: false        # 是否启用自动回复（需浏览器启动后生效）
   min_reply_delay_sec: 15          # 自动回复最小延迟（秒）

@@ -682,11 +682,16 @@ playwright install firefox
 ```
 
 使用流程：
-1. 前端进入「BOSS」标签页 → 点击「启动浏览器」（**首次必须非 headless**，弹出 Firefox 扫码登录）
+1. 前端进入「BOSS」标签页 → 点击「启动浏览器」（**首次必须可见模式**，弹出 Firefox 扫码登录）
+   - 前端交互流程始终以可见模式（headless=false）启动，不受 `config.yaml` 影响
+   - `config.yaml` 中 `boss.headless` 仅作用于 CLI / Agent 等未显式指定 headless 的启动路径
+   - **首次登录必须 headless=false**（可见浏览器扫码）；登录态保存后如需无人值守自动化，可改 true
 2. 登录态持久化在 `backend/boss/.boss_profile/`（cookie + session，重启自动恢复）
 3. 搜索岗位 → 点击「导入岗位」→ 自动切换到对话区分析该岗位
 4. 可选：设置页填写简历摘要后，启用「自动回复」或使用「AI 自动求职」
 
+> **运行环境要求**：运行后端的 Python 环境必须安装 Playwright + Firefox（`pip install playwright && playwright install firefox`）。
+> 若点击「启动浏览器」无反应或报错，先确认后端的 Python 有 playwright，再确认 `python -m playwright install firefox` 已执行。
 > 若 `backend/config.yaml` 中 `boss.enabled: false`，`/api/boss/*` 路由仍注册但浏览器不可用。
 
 ### 9.7 Docker 一键部署

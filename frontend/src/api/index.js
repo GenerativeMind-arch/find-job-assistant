@@ -74,9 +74,10 @@ export function bossStatus() {
   return bossApi.get('/status')
 }
 
-/** POST /api/boss/system/start */
+/** POST /api/boss/system/start
+ *  交互流程始终以可见模式启动（headless=false），便于扫码登录与手动操作。 */
 export function bossStart() {
-  return bossApi.post('/system/start')
+  return bossApi.post('/system/start', { headless: false })
 }
 
 /** POST /api/boss/system/stop */

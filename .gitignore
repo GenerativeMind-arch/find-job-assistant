@@ -16,3 +16,11 @@ node_modules/
 
 docs/private-deployment.md
 /docs/marketing/*.md
+
+# 飞书导出脚本的登录态（含 Cookie，勿提交）
+scripts/.feishu_profile/
+# 飞书导出产物
+scripts/feishu_doc.pdf
+
+# Boss 直聘浏览器登录态与运行时数据（含 Cookie/会话/缓存，勿提交）
+backend/boss/.boss_profile/

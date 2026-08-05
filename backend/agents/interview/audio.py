@@ -1,7 +1,7 @@
-"""语音转文字 — 调用阿里云 DashScope qwen-audio-turbo。
+"""语音转文字 — 调用阿里云 DashScope qwen-audio-3.0-realtime-plus。
 
 候选人在模拟面试中通过语音作答，前端录音后 base64 编码上传，
-后端调用 qwen-audio-turbo 将音频转为文字，作为回答文本交给 Judge Agent。
+后端调用 qwen-audio-3.0-realtime-plus 将音频转为文字，作为回答文本交给 Judge Agent。
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from log import get_logger
 
 logger = get_logger("agent")
 
-# qwen-audio-turbo 多模态生成端点
+# qwen-audio-3.0-realtime-plus 多模态生成端点
 _AUDIO_API_URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
 
 
@@ -67,11 +67,11 @@ async def transcribe_audio(audio_base64: str, timeout: float = 30.0) -> str:
         raise ValueError("音频数据为空")
 
     # 构造多模态请求
-    # 音频以 URL 形式传给 qwen-audio-turbo，因此需先转 data URI
+    # 音频以 URL 形式传给 qwen-audio-3.0-realtime-plus，因此需先转 data URI
     data_uri = "data:audio/wav;base64," + base64.b64encode(audio_bytes).decode()
 
     payload = {
-        "model": "qwen-audio-turbo",
+        "model": "qwen-audio-3.0-realtime-plus",
         "input": {
             "messages": [
                 {
@@ -97,10 +97,10 @@ async def transcribe_audio(audio_base64: str, timeout: float = 30.0) -> str:
             resp.raise_for_status()
             data = resp.json()
     except httpx.HTTPStatusError as exc:
-        logger.error("qwen-audio-turbo HTTP %s: %s", exc.response.status_code, exc.response.text[:300])
+        logger.error("qwen-audio-3.0-realtime-plus HTTP %s: %s", exc.response.status_code, exc.response.text[:300])
         raise ValueError(f"语音转写失败（HTTP {exc.response.status_code}）")
     except httpx.HTTPError as exc:
-        logger.error("qwen-audio-turbo request failed: %s", exc)
+        logger.error("qwen-audio-3.0-realtime-plus request failed: %s", exc)
         raise ValueError(f"语音转写请求失败: {exc}")
 
     # 解析返回：output.choices[0].message.content 可能是文本或含图片的列表
@@ -124,5 +124,5 @@ async def transcribe_audio(audio_base64: str, timeout: float = 30.0) -> str:
             raise ValueError("语音转写结果为空")
         return text
     except Exception as exc:
-        logger.error("qwen-audio-turbo response parse failed: %s", exc)
+        logger.error("qwen-audio-3.0-realtime-plus response parse failed: %s", exc)
         raise ValueError(f"语音转写结果解析失败: {exc}")

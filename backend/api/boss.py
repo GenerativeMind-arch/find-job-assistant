@@ -220,6 +220,15 @@ class AgentRunRequest(BaseModel):
     auto_execute: Optional[bool] = True
 
 
+class StartRequest(BaseModel):
+    """启动浏览器请求。
+
+    headless: 是否无头模式。默认 None（读 config.yaml 的 boss.headless）。
+              前端交互流程请显式传 false，确保弹出可见浏览器以便扫码登录。
+    """
+    headless: Optional[bool] = None
+
+
 # ══════════════════════════════════════
 #  Agent Harness（ToolRegistry + AgentLoop）
 # ══════════════════════════════════════
@@ -285,8 +294,13 @@ def boss_status():
 
 
 @router.post("/system/start")
-async def boss_start():
-    return await _get_manager().start(headless=False)
+async def boss_start(req: Optional[StartRequest] = None):
+    manager = _get_manager()
+    headless = req.headless if (req and req.headless is not None) else None
+    result = await manager.start(headless=headless)
+    if result.get("status") == "error":
+        raise HTTPException(status_code=500, detail=result.get("message", "浏览器启动失败"))
+    return result
 
 
 @router.post("/system/stop")
@@ -296,7 +310,11 @@ async def boss_stop():
 
 @router.post("/system/relogin")
 async def boss_relogin():
-    return await _get_manager().relogin()
+    manager = _get_manager()
+    result = await manager.relogin()
+    if result.get("status") == "error":
+        raise HTTPException(status_code=500, detail=result.get("message", "重新登录失败"))
+    return result
 
 
 @router.post("/system/heartbeat")

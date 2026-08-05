@@ -125,10 +125,28 @@ async def _check_required_services() -> None:
 if __name__ == "__main__":
     import asyncio
 
+    # ── Windows + uvicorn reload 兼容补丁 ──
+    # uvicorn 在 reload 或多 worker（use_subprocess=True）时，会在 Windows 上强制
+    # 设置 WindowsSelectorEventLoopPolicy（uvicorn/loops/asyncio.py:asyncio_setup）。
+    # 而 Playwright 同步 API 启动浏览器子进程依赖 ProactorEventLoop（asyncio
+    # 子进程在 Windows 仅支持 Proactor），两者冲突导致 Boss 浏览器启动失败
+    # （空 NotImplementedError）。
+    # 这里覆盖 uvicorn 的 loop setup：不强制 Selector，保持 Windows 默认 Proactor。
+    try:
+        import uvicorn.loops.asyncio as _uv_asyncio_loops
+
+        def _boss_friendly_asyncio_setup(use_subprocess: bool = False):
+            if sys.platform == "win32":
+                asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
+        _uv_asyncio_loops.asyncio_setup = _boss_friendly_asyncio_setup
+    except Exception:
+        pass  # uvicorn 升级导致内部变化时静默降级，不影响启动
+
     cfg = get_fastapi_config()
     try:
         asyncio.run(_check_required_services())
-    except Exception as exc:  
+    except Exception as exc:
         logger.critical("Startup aborted because dependency check failed: %s", exc, exc_info=True)
         sys.exit(1)
 

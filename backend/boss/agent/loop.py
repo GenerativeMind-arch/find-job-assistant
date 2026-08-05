@@ -359,7 +359,7 @@ class AgentLoop:
 
     def _build_extra_context(self) -> str:
         try:
-            from boss_state import get_setting, get_today_application_count
+            from boss.boss_state import get_setting, get_today_application_count
             parts = []
             resume = get_setting("resume_summary", "")
             if resume and len(resume) > 5:
@@ -375,7 +375,7 @@ class AgentLoop:
     def _build_context(self) -> str:
         parts = []
         try:
-            from boss_state import get_setting
+            from boss.boss_state import get_setting
             resume = get_setting("resume_summary", "")
             if resume and len(resume) > 5:
                 parts.append(f"resume: {resume[:500]}")
