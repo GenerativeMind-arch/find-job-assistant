@@ -1,120 +1,150 @@
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
-# Interview Assistant
+<h1 align="center">🛠️ Find-job Assistant</h1>
 
-![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
-![LangGraph](https://img.shields.io/badge/Workflow-LangGraph-1C3C3C?style=flat-square)
-![Vue 3](https://img.shields.io/badge/Frontend-Vue_3-42B883?style=flat-square&logo=vuedotjs&logoColor=white)
-![MySQL](https://img.shields.io/badge/Database-MySQL-4479A1?style=flat-square&logo=mysql&logoColor=white)
-![Redis](https://img.shields.io/badge/Cache-Redis-DC382D?style=flat-square&logo=redis&logoColor=white)
-![Docker](https://img.shields.io/badge/Deploy-Docker-2496ED?style=flat-square&logo=docker&logoColor=white)
+<p align="center">
+  <b>AI-Powered Multi-Agent Job Application Workstation</b><br/>
+  From JD understanding to tailored resumes and mock interviews — all in one conversation.
+</p>
 
-An AI-powered multi-agent web app for job description analysis, candidate profile extraction, resume generation, HTML resume rendering, gap analysis, and interview Q&A preparation.
+<p align="center">
+  <a href="#-screenshots">Screenshots</a> · <a href="#-features">Features</a> · <a href="#-architecture">Architecture</a> · <a href="#-quick-start">Quick Start</a> · <a href="#-tech-stack">Tech Stack</a>
+</p>
 
-The project is already deployed and publicly accessible at [http://8.153.79.69:3001](http://8.153.79.69:3001). If you want to try the full workflow before setting up locally, open the live site and start with a JD upload to see the multi-agent pipeline in action.
+<p align="center">
+  <img src="https://img.shields.io/badge/Backend-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/Workflow-LangGraph-1C3C3C?style=flat-square" alt="LangGraph" />
+  <img src="https://img.shields.io/badge/Frontend-Vue_3-42B883?style=flat-square&logo=vuedotjs&logoColor=white" alt="Vue 3" />
+  <img src="https://img.shields.io/badge/LLM-DeepSeek-4D6BFE?style=flat-square" alt="DeepSeek" />
+  <img src="https://img.shields.io/badge/OCR-qwen--vl--ocr-7C3AED?style=flat-square" alt="qwen-vl-ocr" />
+  <img src="https://img.shields.io/badge/RAG-ChromaDB-FF6B6B?style=flat-square" alt="ChromaDB" />
+  <img src="https://img.shields.io/badge/Database-MySQL-4479A1?style=flat-square&logo=mysql&logoColor=white" alt="MySQL" />
+  <img src="https://img.shields.io/badge/Cache-Redis-DC382D?style=flat-square&logo=redis&logoColor=white" alt="Redis" />
+  <img src="https://img.shields.io/badge/Deploy-Docker-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker" />
+</p>
 
-## Features
+---
 
-- Multi-turn workflow for JD input, profile input, resume generation, and follow-up editing.
-- Agent-based orchestration with LangGraph for planner, JD analysis, profile extraction, gap analysis, content generation, rendering, and interview preparation.
-- Structured resume content generation with HTML preview and export endpoints.
-- Resume rendering controls exposed through chat-driven render instructions.
-- Gap analysis to surface capability mismatches between a target role and candidate materials.
-- Interview Q&A generation based on the current role and resume context.
-- Web UI built with Vue 3 for chat interaction and result tabs.
-- Redis-backed session state plus MySQL persistence for key workflow artifacts.
+## 📌 Overview
 
-## Demo
+**Interview Assistant** is an AI-driven, multi-agent collaborative system that covers the full job-hunting journey: **job understanding → candidate profiling → tailored resume generation → gap analysis → interview preparation**.
 
-Hosted demo: [http://8.153.79.69:3001](http://8.153.79.69:3001)
+Instead of a simple "ChatGPT writes my resume", it is a stateful, memory-aware job-hunting workstation where multiple specialized agents work together through a **LangGraph** orchestrated workflow. A unified conversation drives the entire pipeline, and results are incrementally updated across structured panels.
 
-You can experience the product as an end user: upload a target JD first, then continue the same conversation with your profile, internship notes, project materials, or follow-up revision requests. The system keeps the current session context and updates the generated results incrementally.
+> 🔬 **Notable capabilities**
+> - Multi-modal resume parsing: text PDFs, **scanned PDFs (OCR)**, and **image resumes (qwen-vl-ocr)**
+> - Agentic RAG with a knowledge base of real interview questions and resume-writing guidance
+> - Interactive mock interviews with **voice input**, 4-dimension AI judging, and a final report
+> - One-click export to **HTML / Markdown / JSON / PDF**
+> - Built-in **BOSS直聘 (BOSS Zhipin)** automation for job search and application
 
-### JD Analysis
+---
 
-The workflow starts from the target role. After a JD is pasted or uploaded, the system extracts responsibilities, keywords, and role expectations that will drive downstream resume generation and interview preparation.
+## 📸 Screenshots
 
-![JD analysis demo](./assets/JD_Analysis_Demo.png)
+### 1 · AI Job Workstation
 
-### Resume Generation
+A single conversation drives the whole pipeline — paste a JD, upload your materials, and watch the results build up on the right panel.
 
-Once candidate materials are provided, the content and rendering agents collaborate to generate a structured resume preview that can be refined through natural-language follow-up instructions.
+<p align="center"><img src="./assets/screenshots/1.png" alt="AI Job Workstation" width="720" /></p>
 
-![Resume generation demo](./assets/Resume_Generation_Demo.png)
+### 2 · BOSS Zhipin Automation
 
-### Gap Analysis
+Search, filter, apply, and manage HR conversations inside the built-in BOSS panel, with optional AI-driven autonomous job seeking.
 
-The gap analysis panel highlights what is missing, weak, or unsupported compared with the JD, helping users identify where they should add evidence or clarify experience.
+<p align="center"><img src="./assets/screenshots/2.png" alt="BOSS Zhipin automation" width="720" /></p>
 
-![Gap analysis demo](./assets/Gap_Analysis_Demo.png)
+### 3 · Candidate Profile Extraction
 
-### Mock Interview
+Uploaded resumes (text / scanned / image) are parsed and structured into a candidate profile — education, skills, and experience.
 
-The interview panel turns the current role and generated resume context into likely interview questions, making it easier to prepare around the exact target position.
+<p align="center"><img src="./assets/screenshots/3.png" alt="Candidate profile" width="720" /></p>
 
-![Mock interview demo](./assets/Mock_Interview_Demo.png)
+### 4 · Gap Analysis
 
-### Debug View
+The system surfaces capability gaps between the target role and your profile, highlighting what evidence to add or clarify.
 
-For development and inspection, the debug panel exposes intermediate artifacts such as structured content, render config, and triggered agents in the current session.
+<p align="center"><img src="./assets/screenshots/4.png" alt="Gap analysis" width="720" /></p>
 
-![Debug panel demo](./assets/Debug_Demo.png)
+### 5 · Interactive Mock Interview
 
-## Try It Online
+Generate 5 role-specific questions and answer them one by one, in **text or voice**, with real-time 4-dimension scoring.
 
-The hosted instance at [http://8.153.79.69:3001](http://8.153.79.69:3001) is the fastest way to evaluate the product experience. It is especially useful if you want to validate the multi-turn workflow, inspect the result tabs, or see how resume edits and missing-information prompts behave before cloning the repository.
+<p align="center"><img src="./assets/screenshots/5.png" alt="Mock interview" width="720" /></p>
 
-If you want the source code or plan to contribute, visit the GitHub repository: [https://github.com/Programmergyt/interview-assistant](https://github.com/Programmergyt/interview-assistant).
+### 6 · Live Interview Q&A
 
-## Project Structure
+The AI interviewer follows up on your answers, and the Judge agent scores accuracy, depth, expression, and relevance.
 
-```text
-interview-assistant/
-├── backend/           # FastAPI app, agents, workflow, storage, prompts, tests
-├── frontend/          # Vue 3 + Vite web client
-├── docker/            # Dockerfiles and Nginx config for frontend/backend
-├── docs/              # Design and planning documents
-├── docker-compose.yml
-└── README*.md
+<p align="center"><img src="./assets/screenshots/6.png" alt="Live interview Q&A" width="720" /></p>
+
+---
+
+## ✨ Features
+
+| Area | What it does |
+| --- | --- |
+| 🔍 **JD Analysis** | Extracts responsibilities, keywords, and role expectations that drive downstream generation. |
+| 👤 **Candidate Profiling** | Parses text / scanned / image resumes via OCR + LLM into structured facts. |
+| 📝 **Resume Generation** | LangGraph content agent generates STAR-style, keyword-aligned resume JSON. |
+| 🎨 **Resume Rendering** | Template engine renders structured JSON to professional HTML; adjust layout via natural language. |
+| 📊 **Gap Analysis** | Compares role requirements vs. candidate capability; surfaces missing or weak evidence. |
+| 🗣️ **Mock Interview** | Interactive one-on-one mock interview with voice input and 4-dimension judging. |
+| 📚 **Agentic RAG** | Real interview questions + resume guidance knowledge base for retrieval-augmented generation. |
+| 📤 **Export** | Export resumes to HTML / Markdown / JSON / PDF. |
+| 🤖 **BOSS Zhipin** | Optional browser automation for job search, application, and conversation management. |
+
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    User Interaction (Vue 3)                   │
+│   Chat Panel        Result Tabs (Job / Resume / Gaps / ...)  │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+┌───────────────────────────▼─────────────────────────────────┐
+│                     LangGraph StateGraph                      │
+│                                                               │
+│   Planner ──▶ JD Agent ──▶ Gap Agent ──▶ Content Agent        │
+│                 Profile Agent        Render Agent             │
+│                 (interview_trigger → REST mock interview)     │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+   ┌──────────────┬─────────┴───────┬──────────────┬────────────┐
+   ▼              ▼                 ▼              ▼            ▼
+ Redis        MySQL             ChromaDB        DashScope    Boss
+ session      persistence       knowledge       embedding    automation
+ state                          vectors        / rerank /    (Playwright)
+                                              vision OCR
 ```
 
-## Tech Stack
+- **Multi-agent orchestration**: LangGraph state graph with a Planner that routes intents to specialized agents; agents communicate only through shared `CopilotState`.
+- **Plan Mode**: intent → plan builder → dependency validation → topological execution.
+- **Agentic RAG**: `qwen-vl-ocr` for scanned/image OCR, DeepSeek for Q&A structuring, DashScope embeddings + `gte-rerank-v2` rerank, ChromaDB storage.
+- **Mock interview**: runs as a dedicated REST flow (start → chat → end) outside the single-pass graph, with voice transcription via DashScope.
 
-| Layer | Stack |
-| --- | --- |
-| Backend API | FastAPI, Uvicorn |
-| Agent orchestration | LangGraph |
-| LLM integration | LangChain, DeepSeek |
-| Embedding / rerank | DashScope |
-| Frontend | Vue 3, Vite, Axios |
-| Session store | Redis |
-| Persistence | MySQL |
-| Configuration | PyYAML, python-dotenv |
-| Testing | pytest |
+---
 
-## Quick Start
-
-The current recommended setup for new users is local development.
-
-The repository already includes Dockerfiles and a Compose file for the frontend and backend services, but the current Compose setup expects reachable MySQL and Redis instances rather than provisioning a complete one-command stack.
+## 🚀 Quick Start
 
 ### Prerequisites
 
 - Python 3.11+
 - Node.js 18+
-- MySQL 8+
-- Redis 6+
-- API keys for the configured model providers
+- MySQL 8+ & Redis 6+ (local or via Docker)
+- API keys: `DEEPSEEK_API_KEY`, `DASHSCOPE_API_KEY` (and optional `LANGCHAIN_API_KEY`)
 
-### 1. Install backend dependencies
+### 1 · Install backend dependencies
 
 ```bash
 pip install -r backend/requirements.txt
 ```
 
-### 2. Create backend environment variables
+### 2 · Configure environment
 
-Create `backend/.env`.
+Create `backend/.env`:
 
 ```env
 DEEPSEEK_API_KEY=your_deepseek_api_key
@@ -133,102 +163,117 @@ FASTAPI_PORT=8000
 FASTAPI_DEBUG=true
 ```
 
-`backend/config_loader.py` reads `backend/.env` and lets environment variables override the defaults from `backend/config.yaml`.
-
-### 3. Initialize the database
-
-Run the SQL schema manually:
+### 3 · Initialize the database
 
 ```bash
 mysql -u root -p < backend/sql/init_schema.sql
 ```
 
-Or use the initialization script:
-
-```bash
-python backend/sql/init_db.py
-```
-
-### 4. Start the backend
+### 4 · Start the backend
 
 ```bash
 python backend/main.py
-```
-
-Backend health check:
-
-```bash
+# health check
 curl http://localhost:8000/health
 ```
 
-### 5. Start the frontend
+### 5 · Start the frontend
 
 ```bash
 cd frontend
 npm install
 npm run dev
+# → http://localhost:3000
 ```
 
-The Vite dev server runs on `http://localhost:3000` and proxies API requests to the backend.
+### 6 · (Optional) Build the knowledge base
 
-### 6. Try the main workflow
+The RAG knowledge base is built from scanned PDFs:
 
 ```bash
-curl -X POST http://localhost:8000/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Paste a job description here"}'
+python scripts/ocr_and_structure.py        # qwen-vl-ocr → Q&A structuring
+python scripts/build_knowledge_base.py     # → ChromaDB collections
+python scripts/query_knowledge_base.py     # inspect the knowledge base
 ```
 
-Then continue the same session with candidate materials, and preview the generated resume HTML with:
+### 7 · (Optional) Evaluate the RAG pipeline
 
 ```bash
-curl "http://localhost:8000/api/resume/preview?session_id=YOUR_SESSION_ID"
+python scripts/evaluate_rag.py             # RAGAS-style evaluation report
 ```
 
-## Configuration
+---
 
-### Model and API configuration
+## 🧰 Tech Stack
 
-- LLM defaults are defined in `backend/config.yaml`.
-- API keys are loaded from `backend/.env` or process environment variables.
-- The current backend configuration references DeepSeek for chat completion and DashScope for embeddings and reranking.
+| Layer | Technology |
+| --- | --- |
+| Backend API | FastAPI, Uvicorn |
+| Agent orchestration | LangGraph 1.0+ |
+| LLM | DeepSeek (`deepseek-chat`) |
+| OCR / Vision | DashScope `qwen-vl-ocr` |
+| Embedding / Rerank | DashScope `text-embedding-v4` / `gte-rerank-v2` |
+| Vector store | ChromaDB |
+| Frontend | Vue 3, Vite, Axios |
+| Session store | Redis |
+| Persistence | MySQL |
+| Browser automation | Playwright (BOSS Zhipin) |
+| PDF export | Playwright (Chromium) |
+| Testing | pytest |
 
-### Storage configuration
+---
 
-- Redis is used for session state.
-- MySQL is used for persistent storage of sessions, job data, profile data, resume content, render config, resume HTML, and interview output.
-- All major MySQL and Redis connection fields can be overridden with environment variables.
+## 📁 Project Structure
 
-### Docker note
+```text
+interview-assistant/
+├── backend/
+│   ├── main.py               # FastAPI entry, startup checks
+│   ├── config.yaml           # global YAML config
+│   ├── agents/               # LangGraph agents (planner, jd, profile, gap, content, render, interview)
+│   ├── workflow/             # state graph, CopilotState, Plan Mode engine
+│   ├── boss/                 # BOSS Zhipin automation + AgentLoop harness
+│   ├── services/             # knowledge base, RAG, vision OCR, PDF export, file parsing
+│   ├── models/               # LLM / embedding / rerank factories
+│   ├── api/                  # chat / resume / export / interview / boss routers
+│   └── sql/                  # DB schema
+├── frontend/
+│   └── src/
+│       ├── components/       # ChatPanel, ResultPanel, tab panels
+│       └── api/              # Axios API client
+├── data/knowledge_base/      # knowledge sources (scanned PDFs, OCR, structured JSON)
+├── scripts/                  # OCR, KB build, RAG evaluation, PDF export
+├── assets/screenshots/       # README screenshots
+└── docs/                     # design documents
+```
 
-- `docker-compose.yml` currently starts the application services, but it does not provision MySQL or Redis for public users.
-- If you want a fully self-contained public deployment workflow, treat that as future work rather than a supported one-click path today.
+---
 
-## Roadmap
+## 🗺️ Roadmap
 
-- Improve the follow-up question flow for incomplete candidate input.
-- Add clearer diff views for partial resume updates.
-- Support cross-session memory and user preferences.
-- Add more resume templates and section-level rendering control.
-- Expand export formats, especially Markdown and PDF.
-- Add retrieval-enhanced workflows where they improve job matching and editing quality.
+- [x] Multi-modal resume parsing (text / scanned / image)
+- [x] Agentic RAG knowledge base + RAGAS-style evaluation
+- [x] Interactive mock interview with voice input
+- [x] PDF / HTML / JSON / Markdown export
+- [x] BOSS Zhipin integration
+- [ ] Cross-session memory and user preferences
+- [ ] More resume templates and section-level rendering control
+- [ ] One-command Docker deployment with provisioned MySQL / Redis
 
-## Contributing
+---
+
+## 🤝 Contributing
 
 Issues and pull requests are welcome.
 
-If you plan to contribute code, a good starting point is:
-
 1. Run the backend and frontend locally.
-2. Review the documents in `docs/` for workflow and state design.
-3. Add or update tests under `backend/test/` for behavior changes.
+2. Review the design docs under `docs/`.
+3. Add or update tests under `backend/test/`.
 
-## License
+## 📄 License
 
-TODO: no license file is currently included in the repository. Add a `LICENSE` file before treating the project as a standard open source distribution.
+This project is open-sourced for learning and research purposes. Please add a `LICENSE` file before treating it as a standard open-source distribution.
 
-## Support
+## ⭐ Support
 
-If this project helps you, please consider giving it a star.
-
-
+If this project helps you, please consider giving it a star. Thank you!

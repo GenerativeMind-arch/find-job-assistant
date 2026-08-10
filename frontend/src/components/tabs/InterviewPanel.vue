@@ -9,7 +9,7 @@
       <button class="primary-btn" :disabled="loading" @click="startInterview">
         {{ loading ? '准备中...' : '开始面试' }}
       </button>
-      <p v-if="!hasJob" class="warn-hint">⚠️ 请先提供目标岗位（搜索或粘贴 JD）再开始面试</p>
+      <p v-if="!hasJob" class="warn-hint">⚠️ 请先提供目标岗位（搜索或粘贴 JD）及简历后再开始面试</p>
     </div>
 
     <!-- 加载中 -->
@@ -141,7 +141,7 @@
 <script setup>
 import { ref, computed, onUnmounted } from 'vue'
 import {
-  interviewStart, interviewChat, interviewEnd,
+  interviewStart, interviewChat, interviewEnd, interviewTranscribe,
 } from '../../api/index.js'
 import { AudioRecorder } from '../../utils/recorder.js'
 
@@ -157,6 +157,7 @@ const currentRound = ref(0)
 const totalRounds = ref(5)
 const currentQuestion = ref(null)
 const answerText = ref('')
+const pendingAudioBase64 = ref('')  // 录音原始数据兜底（转写失败时交后端处理）
 const lastJudge = ref(null)
 const lastRound = ref(0)
 const isLast = ref(false)
@@ -200,20 +201,16 @@ async function startInterview() {
 async function submitAnswer() {
   if (!answerText.value.trim() && !isRecording) return
   loading.value = true
-  const answer = answerText.value.trim()
-  // 若正在录音，先停止
+  // 若正在录音，先停止（会触发转写并填入 answerText）
   if (isRecording) await stopRecording()
-
-  let audioBase64 = ''
-  if (recorder && recorder.hasData()) {
-    try {
-      audioBase64 = recorder.getWavBase64()
-      transcribeNote.value = '语音已录制，正在识别...'
-    } catch (e) {
-      console.error('WAV 编码失败', e)
-    }
-  }
+  const answer = answerText.value.trim()
   answerText.value = ''
+  // 仅当没有有效文字（转写失败/未说话）时，才把音频交给后端兜底转写
+  let audioBase64 = ''
+  if (!answer && pendingAudioBase64.value) {
+    audioBase64 = pendingAudioBase64.value
+  }
+  pendingAudioBase64.value = ''
 
   try {
     const { data } = await interviewChat(props.sessionId, answer, audioBase64)
@@ -278,8 +275,33 @@ async function stopRecording() {
     recorder.stop()
     isRecording = false
     const hasData = recorder.hasData()
+    // 必须先取音频，再置 null（否则 recorder 为 null 无法取 WAV）
+    let wavBase64 = ''
+    try {
+      if (hasData) wavBase64 = recorder.getWavBase64()
+    } catch (e) {
+      console.error('WAV 编码失败', e)
+    }
     recorder = null
-    transcribeNote.value = hasData ? '录音完成，提交后自动识别' : ''
+    if (!hasData || !wavBase64) {
+      transcribeNote.value = hasData ? '录音数据为空，请重新录音' : ''
+      return
+    }
+    // 停止后立即转写，把文字填入回答框（用户可确认/编辑）
+    pendingAudioBase64.value = wavBase64  // 兜底：转写失败时交后端处理
+    transcribeNote.value = '语音识别中...'
+    try {
+      const { data } = await interviewTranscribe(wavBase64)
+      const text = (data?.text || '').trim()
+      if (text) {
+        answerText.value = text
+        transcribeNote.value = '✅ 语音已转写，可编辑后提交'
+      } else {
+        transcribeNote.value = '语音转写为空，请重新录音'
+      }
+    } catch (e) {
+      transcribeNote.value = '语音转写失败，请用文字回答或重试'
+    }
   }
 }
 
@@ -289,6 +311,7 @@ function resetInterview() {
   currentQuestion.value = null
   lastJudge.value = null
   answerText.value = ''
+  pendingAudioBase64.value = ''
   isLast.value = false
   avgScore.value = ''
   detailedScores.value = []

@@ -1,120 +1,154 @@
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
-# Interview Assistant
+<p align="center">
+  <img src="./assets/screenshots/1.png" alt="Interview Assistant" width="640" />
+</p>
 
-![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
-![LangGraph](https://img.shields.io/badge/Workflow-LangGraph-1C3C3C?style=flat-square)
-![Vue 3](https://img.shields.io/badge/Frontend-Vue_3-42B883?style=flat-square&logo=vuedotjs&logoColor=white)
-![MySQL](https://img.shields.io/badge/Database-MySQL-4479A1?style=flat-square&logo=mysql&logoColor=white)
-![Redis](https://img.shields.io/badge/Cache-Redis-DC382D?style=flat-square&logo=redis&logoColor=white)
-![Docker](https://img.shields.io/badge/Deploy-Docker-2496ED?style=flat-square&logo=docker&logoColor=white)
+<h1 align="center">🛠️ Interview Assistant</h1>
 
-一个面向求职场景的多 Agent AI Web 应用，支持岗位 JD 分析、候选人画像提取、简历内容生成、HTML 简历渲染、能力缺口分析与面试问答准备。
+<p align="center">
+  <b>AI 驱动的多 Agent 智能求职工作站</b><br/>
+  从岗位理解到定制简历、再到模拟面试，一站式对话完成。
+</p>
 
-项目已经成功部署并可直接访问：[http://8.153.79.69:3001](http://8.153.79.69:3001)。如果你想先体验完整流程、再决定是否本地部署，可以直接打开线上站点，从上传目标 JD 开始感受整条多智能体工作流。
+<p align="center">
+  <a href="#-界面预览">界面预览</a> · <a href="#-核心特性">核心特性</a> · <a href="#-技术架构">技术架构</a> · <a href="#-快速开始">快速开始</a> · <a href="#-技术栈">技术栈</a>
+</p>
 
-## 功能特性
+<p align="center">
+  <img src="https://img.shields.io/badge/Backend-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/Workflow-LangGraph-1C3C3C?style=flat-square" alt="LangGraph" />
+  <img src="https://img.shields.io/badge/Frontend-Vue_3-42B883?style=flat-square&logo=vuedotjs&logoColor=white" alt="Vue 3" />
+  <img src="https://img.shields.io/badge/LLM-DeepSeek-4D6BFE?style=flat-square" alt="DeepSeek" />
+  <img src="https://img.shields.io/badge/OCR-qwen--vl--ocr-7C3AED?style=flat-square" alt="qwen-vl-ocr" />
+  <img src="https://img.shields.io/badge/RAG-ChromaDB-FF6B6B?style=flat-square" alt="ChromaDB" />
+  <img src="https://img.shields.io/badge/Database-MySQL-4479A1?style=flat-square&logo=mysql&logoColor=white" alt="MySQL" />
+  <img src="https://img.shields.io/badge/Cache-Redis-DC382D?style=flat-square&logo=redis&logoColor=white" alt="Redis" />
+  <img src="https://img.shields.io/badge/Deploy-Docker-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker" />
+</p>
 
-- 支持多轮对话工作流，覆盖 JD 输入、个人材料输入、简历生成与后续编辑。
-- 基于 LangGraph 编排多个 Agent，包括 Planner、JD 分析、画像提取、Gap Analysis、内容生成、渲染和面试问答。
-- 生成结构化简历内容，并提供 HTML 预览与导出接口。
-- 支持通过自然语言调整简历渲染效果，例如布局、样式和展示形式。
-- 提供岗位与候选人之间的能力缺口分析，帮助识别重点补强方向。
-- 基于当前岗位与简历上下文生成面试问答内容。
-- 提供 Vue 3 Web 界面，方便进行对话交互和查看各类结果。
-- 使用 Redis 管理会话状态，使用 MySQL 持久化关键业务数据。
+---
 
-## Demo
+## 📌 项目简介
 
-在线演示：[http://8.153.79.69:3001](http://8.153.79.69:3001)
+**Interview Assistant** 是一款 AI 驱动的多 Agent 协作求职助手系统，覆盖求职全流程：**岗位理解 → 候选人画像 → 定制简历生成 → 差距分析 → 面试准备**。
 
-你可以直接以终端用户视角体验完整产品流程：先上传目标 JD，然后在同一轮会话中继续补充个人基本信息、实习经历、项目材料，或者直接提出后续修改要求。系统会保留当前会话上下文，并持续增量更新生成结果。
+它不是简单的"ChatGPT 写简历"，而是一个有状态、有记忆的多 Agent 求职工作站。多个专业智能体通过 **LangGraph** 状态图协同工作，统一的对话驱动整条流水线，结果在右侧结构化面板中持续增量更新。
 
-### JD 分析
+> 🔬 **核心亮点**
+> - **多模态简历解析**：支持文本型 PDF、扫描件 PDF（OCR）、图片简历（qwen-vl-ocr）
+> - **Agentic RAG**：真实大厂面试题库 + 简历书写指导知识库
+> - **交互式模拟面试**：支持文字/语音作答、Judge 四维度评分、综合评价
+> - **一键导出**：HTML / Markdown / JSON / PDF
+> - **内置 BOSS 直聘**：岗位搜索、投递、会话管理的浏览器自动化
 
-整个流程从目标岗位开始。上传或粘贴 JD 后，系统会抽取岗位职责、关键词和能力要求，为后续简历生成与面试准备提供统一上下文。
+---
 
-![JD 分析演示](./assets/JD_Analysis_Demo.png)
+## 📸 界面预览
 
-### 简历生成
+### 1 · AI 求职工作站
 
-在补充候选人材料后，内容生成与渲染 Agent 会协同产出结构化简历预览，并支持通过自然语言持续修改和优化。
+一段对话驱动全流程——粘贴 JD、上传材料，右侧面板实时构建结果。
 
-![简历生成演示](./assets/Resume_Generation_Demo.png)
+<p align="center"><img src="./assets/screenshots/1.png" alt="AI 求职工作站" width="720" /></p>
 
-### 能力缺口分析
+### 2 · BOSS 直聘自动化
 
-能力缺口面板会指出候选人材料与目标 JD 之间缺失、薄弱或证据不足的部分，帮助用户更快判断应该补强哪些信息。
+内置 BOSS 面板中搜索、筛选、投递、管理 HR 会话，并支持 AI 自动求职。
 
-![能力缺口分析演示](./assets/Gap_Analysis_Demo.png)
+<p align="center"><img src="./assets/screenshots/2.png" alt="BOSS 直聘自动化" width="720" /></p>
 
-### 模拟面试
+### 3 · 候选人画像提取
 
-面试问答面板会结合当前岗位和生成后的简历内容，整理更贴近真实投递场景的面试问题，便于用户围绕目标岗位进行准备。
+上传的简历（文本/扫描件/图片）经解析后结构化为候选人画像——教育背景、技能与经历。
 
-![模拟面试演示](./assets/Mock_Interview_Demo.png)
+<p align="center"><img src="./assets/screenshots/3.png" alt="候选人画像" width="720" /></p>
 
-### 调试视图
+### 4 · 能力缺口分析
 
-为了便于开发和排查问题，调试面板会展示当前会话中的结构化内容、渲染配置以及触发过的 Agent 等中间结果。
+系统对比目标岗位与候选人能力，标出需要补充或明确的证据项。
 
-![调试视图演示](./assets/Debug_Demo.png)
+<p align="center"><img src="./assets/screenshots/4.png" alt="能力缺口分析" width="720" /></p>
 
-## 在线体验
+### 5 · 交互式模拟面试
 
-已部署的线上实例 [http://8.153.79.69:3001](http://8.153.79.69:3001) 是了解这个项目的最快方式。你可以直接验证多轮工作流、查看各个结果标签页，体验简历编辑、缺失信息补全和面试问答生成的整体效果，再决定是否克隆仓库进一步使用或开发。
+基于岗位生成 5 道针对性题目，逐题作答，支持文字/语音，四维度即时评分。
 
-如果你想查看源码或参与贡献，可以访问 GitHub 仓库：[https://github.com/Programmergyt/interview-assistant](https://github.com/Programmergyt/interview-assistant)。
+<p align="center"><img src="./assets/screenshots/5.png" alt="模拟面试" width="720" /></p>
 
-## 项目结构
+### 6 · 面试问答实况
 
-```text
-interview-assistant/
-├── backend/           # FastAPI 后端、Agents、工作流、存储层、Prompt、测试
-├── frontend/          # Vue 3 + Vite 前端
-├── docker/            # 前后端 Dockerfile 与 Nginx 配置
-├── docs/              # 设计与规划文档
-├── docker-compose.yml
-└── README*.md
+AI 面试官基于回答深入追问，Judge Agent 从准确性/深度/表达/匹配度四个维度打分。
+
+<p align="center"><img src="./assets/screenshots/6.png" alt="面试问答实况" width="720" /></p>
+
+---
+
+## ✨ 核心特性
+
+| 能力 | 说明 |
+| --- | --- |
+| 🔍 **JD 分析** | 抽取岗位职责、关键词与能力要求，驱动后续生成。 |
+| 👤 **候选人画像** | 文本/扫描件/图片简历经 OCR + LLM 结构化提取。 |
+| 📝 **简历生成** | LangGraph Content Agent 生成 STAR 风格、关键词对齐的简历 JSON。 |
+| 🎨 **简历渲染** | 模板引擎渲染结构化 JSON 为专业 HTML，支持自然语言调整排版。 |
+| 📊 **差距分析** | 对比岗位要求与候选人能力，标出缺失或薄弱证据。 |
+| 🗣️ **模拟面试** | 一问一答交互式面试，语音输入 + 四维度评分。 |
+| 📚 **Agentic RAG** | 真实面经 + 简历指导知识库，检索增强生成。 |
+| 📤 **导出** | 简历导出为 HTML / Markdown / JSON / PDF。 |
+| 🤖 **BOSS 直聘** | 可选浏览器自动化，支持岗位搜索、投递与会话管理。 |
+
+---
+
+## 🏗️ 技术架构
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   用户交互层（Vue 3）                         │
+│   对话面板        结果 Tab（岗位/简历/缺口/面试/调试/BOSS）   │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+┌───────────────────────────▼─────────────────────────────────┐
+│                  LangGraph 状态图编排                        │
+│                                                              │
+│  Planner ──▶ JD Agent ──▶ Gap Agent ──▶ Content Agent       │
+│               Profile Agent        Render Agent              │
+│              (interview_trigger → REST 模拟面试)              │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+   ┌──────────────┬─────────┴───────┬──────────────┬────────────┐
+   ▼              ▼                 ▼              ▼            ▼
+ Redis        MySQL             ChromaDB        DashScope    Boss
+ 会话状态      持久化            知识向量         embedding  自动化
+                             (cv/interview)    / rerank /  (Playwright)
+                                             视觉OCR
 ```
 
-## 技术栈
+- **多 Agent 编排**：LangGraph 状态图，Planner 按意图路由到专业 Agent；Agent 仅通过共享 `CopilotState` 通信。
+- **Plan Mode**：意图 → 计划构建 → 依赖校验 → 拓扑执行。
+- **Agentic RAG**：`qwen-vl-ocr` 识别扫描件/图片，DeepSeek 结构化 Q&A，DashScope 向量化 + `gte-rerank-v2` 精排，ChromaDB 存储。
+- **模拟面试**：独立 REST 流程（start → chat → end），语音经 DashScope 转写。
 
-| 层 | 技术 |
-| --- | --- |
-| 后端 API | FastAPI, Uvicorn |
-| Agent 编排 | LangGraph |
-| 大模型接入 | LangChain, DeepSeek |
-| Embedding / Rerank | DashScope |
-| 前端 | Vue 3, Vite, Axios |
-| 会话存储 | Redis |
-| 持久化 | MySQL |
-| 配置管理 | PyYAML, python-dotenv |
-| 测试 | pytest |
+---
 
-## 快速开始
+## 🚀 快速开始
 
-当前更推荐的使用方式是本地开发启动。
-
-仓库中已经提供前后端 Dockerfile 和 `docker-compose.yml`，但现阶段的 Compose 配置仍然要求你自行准备可访问的 MySQL 与 Redis，并不是一个面向公开用户的完整一键部署方案。
-
-### 环境要求
+### 环境依赖
 
 - Python 3.11+
 - Node.js 18+
-- MySQL 8+
-- Redis 6+
-- 已准备好对应模型服务的 API Key
+- MySQL 8+ 与 Redis 6+（本地或 Docker）
+- API 密钥：`DEEPSEEK_API_KEY`、`DASHSCOPE_API_KEY`（可选 `LANGCHAIN_API_KEY`）
 
-### 1. 安装后端依赖
+### 1 · 安装后端依赖
 
 ```bash
 pip install -r backend/requirements.txt
 ```
 
-### 2. 配置后端环境变量
+### 2 · 配置环境变量
 
-在 `backend/` 目录下创建 `.env` 文件。
+创建 `backend/.env`：
 
 ```env
 DEEPSEEK_API_KEY=your_deepseek_api_key
@@ -133,100 +167,117 @@ FASTAPI_PORT=8000
 FASTAPI_DEBUG=true
 ```
 
-`backend/config_loader.py` 会读取 `backend/.env`，并允许环境变量覆盖 `backend/config.yaml` 中的默认配置。
-
-### 3. 初始化数据库
-
-可以直接执行 SQL 脚本：
+### 3 · 初始化数据库
 
 ```bash
 mysql -u root -p < backend/sql/init_schema.sql
 ```
 
-也可以运行初始化脚本：
-
-```bash
-python backend/sql/init_db.py
-```
-
-### 4. 启动后端
+### 4 · 启动后端
 
 ```bash
 python backend/main.py
-```
-
-健康检查：
-
-```bash
+# 健康检查
 curl http://localhost:8000/health
 ```
 
-### 5. 启动前端
+### 5 · 启动前端
 
 ```bash
 cd frontend
 npm install
 npm run dev
+# → http://localhost:3000
 ```
 
-前端开发服务器默认运行在 `http://localhost:3000`，并代理后端 API 请求。
+### 6 ·（可选）构建知识库
 
-### 6. 体验主流程
+RAG 知识库由扫描件 PDF 构建：
 
 ```bash
-curl -X POST http://localhost:8000/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "在这里粘贴岗位 JD"}'
+python scripts/ocr_and_structure.py        # qwen-vl-ocr → Q&A 结构化
+python scripts/build_knowledge_base.py     # → ChromaDB collections
+python scripts/query_knowledge_base.py     # 查看知识库内容
 ```
 
-拿到 `session_id` 后，可以继续上传个人材料，并通过下面的接口预览生成后的 HTML 简历：
+### 7 ·（可选）RAG 评估
 
 ```bash
-curl "http://localhost:8000/api/resume/preview?session_id=YOUR_SESSION_ID"
+python scripts/evaluate_rag.py             # RAGAS 风格评估报告
 ```
 
-## 配置说明
+---
 
-### 模型与 API 配置
+## 🧰 技术栈
 
-- LLM、Embedding、Rerank 的默认配置定义在 `backend/config.yaml` 中。
-- API Key 会从 `backend/.env` 或系统环境变量中读取。
-- 当前默认配置使用 DeepSeek 作为对话模型，DashScope 作为 Embedding 和 Rerank 服务。
+| 层 | 技术 |
+| --- | --- |
+| 后端 API | FastAPI, Uvicorn |
+| Agent 编排 | LangGraph 1.0+ |
+| LLM | DeepSeek（`deepseek-chat`） |
+| OCR / 视觉 | DashScope `qwen-vl-ocr` |
+| Embedding / Rerank | DashScope `text-embedding-v4` / `gte-rerank-v2` |
+| 向量库 | ChromaDB |
+| 前端 | Vue 3, Vite, Axios |
+| 会话缓存 | Redis |
+| 持久化 | MySQL |
+| 浏览器自动化 | Playwright（BOSS 直聘） |
+| PDF 导出 | Playwright（Chromium） |
+| 测试 | pytest |
 
-### 存储配置
+---
 
-- Redis 用于会话状态管理。
-- MySQL 用于持久化保存会话、岗位信息、候选人画像、简历内容、渲染配置、HTML 简历和面试问答结果。
-- MySQL 与 Redis 的主要连接参数都可以通过环境变量覆盖。
+## 📁 项目结构
 
-### Docker 说明
+```text
+interview-assistant/
+├── backend/
+│   ├── main.py               # FastAPI 入口，启动检查
+│   ├── config.yaml           # 全局 YAML 配置
+│   ├── agents/               # LangGraph Agent（planner/jd/profile/gap/content/render/interview）
+│   ├── workflow/             # 状态图、CopilotState、Plan Mode 引擎
+│   ├── boss/                 # BOSS 直聘自动化 + AgentLoop Harness
+│   ├── services/             # 知识库、RAG、视觉 OCR、PDF 导出、文件解析
+│   ├── models/               # LLM / embedding / rerank 工厂
+│   ├── api/                  # chat / resume / export / interview / boss 路由
+│   └── sql/                  # 数据库 Schema
+├── frontend/
+│   └── src/
+│       ├── components/       # ChatPanel、ResultPanel、各 Tab
+│       └── api/              # Axios API 客户端
+├── data/knowledge_base/      # 知识源（扫描件 PDF、OCR、结构化 JSON）
+├── scripts/                  # OCR、知识库构建、RAG 评估、PDF 导出
+├── assets/screenshots/       # README 截图
+└── docs/                     # 设计文档
+```
 
-- 当前 `docker-compose.yml` 只负责启动应用服务，不会为公开用户自动创建 MySQL 或 Redis。
-- 如果后续要面向开源用户提供完整部署体验，建议把“自包含部署方案”作为后续迭代，而不是在当前 README 中包装成已完善能力。
+---
 
-## Roadmap
+## 🗺️ 路线图
 
-- 完善候选人信息不完整时的主动追问机制。
-- 增加局部简历更新的差异展示能力。
-- 支持跨会话记忆与用户偏好持久化。
-- 提供更多简历模板和 Section 级渲染控制。
-- 补齐 Markdown、PDF 等导出能力。
-- 在适合的场景下加入检索增强能力，提升匹配与编辑质量。
+- [x] 多模态简历解析（文本 / 扫描件 / 图片）
+- [x] Agentic RAG 知识库 + RAGAS 风格评估
+- [x] 交互式模拟面试（含语音输入）
+- [x] PDF / HTML / JSON / Markdown 导出
+- [x] BOSS 直聘集成
+- [ ] 跨会话记忆与用户偏好
+- [ ] 更多简历模板与分节渲染控制
+- [ ] 一键 Docker 部署（自带 MySQL / Redis）
 
-## Contributing
+---
 
-欢迎提交 Issue 和 Pull Request。
+## 🤝 贡献
 
-如果你准备参与开发，建议先从下面几步开始：
+欢迎提交 Issue 与 Pull Request。
 
-1. 在本地跑通前后端。
-2. 阅读 `docs/` 下的工作流与状态设计文档。
-3. 对行为变更同步补充或更新 `backend/test/` 下的测试。
+1. 本地运行后端与前端。
+2. 阅读 `docs/` 下的设计文档。
+3. 为行为改动补充 `backend/test/` 下的测试。
 
-## License
+## 📄 许可
 
-TODO：仓库当前还没有 `LICENSE` 文件。如果你准备以标准开源项目方式发布，建议先补齐许可证。
+本项目以学习与研究为目的开源。作为标准开源发行前，请补充 `LICENSE` 文件。
 
-## Support
+## ⭐ 支持
 
-如果这个项目对你有帮助，欢迎给仓库点一个 Star。
+如果本项目对你有帮助，欢迎点个 Star，谢谢！
