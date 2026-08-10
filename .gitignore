@@ -10,7 +10,7 @@ data/
 
 .env
 .env.*
-!.env.docker
+.env.docker
 
 node_modules/
 

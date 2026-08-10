@@ -1,10 +1,7 @@
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
-<p align="center">
-  <img src="./assets/screenshots/1.png" alt="Interview Assistant" width="640" />
-</p>
 
-<h1 align="center">🛠️ Interview Assistant</h1>
+<h1 align="center">🛠️ Find-job Assistant</h1>
 
 <p align="center">
   <b>AI 驱动的多 Agent 智能求职工作站</b><br/>
