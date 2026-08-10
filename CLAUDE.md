@@ -226,6 +226,22 @@
 └──────────────┘              └──────────────────────┘
 ```
 
+#### 知识库 Collections（v2.2 新增）
+
+| Collection | 来源 | 用途 | 检索场景 |
+|-----------|------|------|---------|
+| `cv_knowledge` | `data/knowledge_base/write_cv.pdf`（简历制作指南） | 简历书写指导（STAR 法则、相关性优先、量化成果） | 简历生成 `content_agent` |
+| `llm_interview_knowledge` | `data/knowledge_base/llm_qa.pdf`（大厂 LLM 面试题库） | 大厂真实面试题 + 答案（LLM基础/微调/RAG/Agent） | 模拟面试出题 + Judge 评分 |
+| `interview_knowledge`（默认） | 通用知识文档 | 通用面试经验 | 兜底检索 |
+
+> **扫描件处理链路**：`scripts/ocr_and_structure.py`（qwen-vl-ocr 识别 → deepseek 结构化 Q&A）
+> → `scripts/build_knowledge_base.py`（按 Q&A 对分块 → ChromaDB）。每条 Q&A 为独立 chunk，
+> metadata 携带 `source_file` / `category` / `difficulty` / `topic`。
+> `KnowledgeBase.search(query, top_n, collection_name)` 支持指定 collection。
+> **Rerank 使用 DashScope `gte-rerank-v2`**：`models/rerank.py` 内置自研适配器
+> （`_DashScopeRerankV2`，端点 `.../rerank/text-rerank/text-rerank`），
+> 覆盖了 langchain_community 旧适配器不兼容 v2 端点的问题。
+
 ### 4.4 状态管理
 
 采用 **Redis + MySQL 双层存储 + LangGraph 运行时状态** 的三层架构：
@@ -409,8 +425,15 @@ interview-assistant/
 │           ├── ResultPanel.vue    #   结果展示（Tabs 容器）
 │           └── tabs/              #   各 Tab 组件
 ├── data/knowledge_base/           # 知识库文件
+│   ├── write_cv.pdf               #   简历制作知识（扫描件，OCR 入库）
+│   ├── llm_qa.pdf                 #   大厂 LLM 面试题库（扫描件，OCR 入库）
+│   ├── *_ocr.txt                  #   OCR 原始文本（qwen-vl-ocr）
+│   ├── *_structured.md/.json      #   LLM 结构化 Q&A/知识点
+│   └── chroma_db/                 #   ChromaDB 持久化（cv_knowledge / llm_interview_knowledge）
 ├── scripts/                       # 运维脚本
-│   └── ingest_knowledge.py        #   知识库入库
+│   ├── ingest_knowledge.py        #   知识库入库（通用文件）
+│   ├── ocr_and_structure.py       #   扫描件 PDF → qwen-vl-ocr → LLM 结构化
+│   └── build_knowledge_base.py    #   结构化 JSON → ChromaDB collection
 └── docs/                          # 设计文档
     ├── PRD.md
     ├── system_design.md
@@ -719,7 +742,3 @@ python -m cli.cli agent-run "搜索岗位，只搜不投"  # Agent 自动执行
 python -m cli.cli import-job <job_url>          # 岗位导入主工作流
 ```
 
----
-
-**在线演示**: http://8.153.79.69:3001  
-**GitHub**: https://github.com/Programmergyt/interview-assistant

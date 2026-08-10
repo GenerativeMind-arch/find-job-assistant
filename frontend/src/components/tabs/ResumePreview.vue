@@ -8,6 +8,9 @@
 
     <template v-else>
       <div class="preview-toolbar">
+        <button class="toolbar-btn primary" @click="exportPdf" title="导出 PDF">
+          导出 PDF
+        </button>
         <button class="toolbar-btn" @click="exportHtml" title="导出 HTML">
           导出 HTML
         </button>
@@ -19,6 +22,17 @@
         </button>
         <button class="toolbar-btn" @click="refreshPreview" title="刷新预览">
           刷新
+        </button>
+      </div>
+      <div class="render-row">
+        <input
+          v-model="renderInstruction"
+          class="render-input"
+          placeholder="排版调整，如：改成两栏布局 / 主题换成深色 / 突出项目经历"
+          @keyup.enter="applyRender"
+        />
+        <button class="toolbar-btn primary" :disabled="rendering || !renderInstruction.trim()" @click="applyRender">
+          {{ rendering ? '调整中...' : '应用排版' }}
         </button>
       </div>
       <div class="preview-frame-wrapper">
@@ -35,18 +49,51 @@
 
 <script setup>
 import { ref } from 'vue'
-import { exportArtifact, readApiError } from '../../api/index.js'
+import { exportArtifact, renderResume, readApiError } from '../../api/index.js'
 
 const props = defineProps({
   resumeHtml: Object,
   sessionId: String,
 })
 
+const emit = defineEmits(['rendered'])
+
 const previewFrame = ref(null)
+const renderInstruction = ref('')
+const rendering = ref(false)
 
 function refreshPreview() {
   if (previewFrame.value) {
     previewFrame.value.srcdoc = props.resumeHtml?.html || ''
+  }
+}
+
+/** 提交排版调整指令 → Render Agent 重新渲染 → 通知父组件刷新 */
+async function applyRender() {
+  if (!props.sessionId || !renderInstruction.value.trim()) return
+  rendering.value = true
+  const instruction = renderInstruction.value.trim()
+  renderInstruction.value = ''
+  try {
+    const { data } = await renderResume(props.sessionId, instruction)
+    emit('rendered', {
+      resume_html: data.resume_html,
+      render_config: data.render_config,
+    })
+  } catch (e) {
+    alert('排版调整失败: ' + await readApiError(e))
+  } finally {
+    rendering.value = false
+  }
+}
+
+async function exportPdf() {
+  if (!props.sessionId) return
+  try {
+    const { data } = await exportArtifact(props.sessionId, 'resume', 'pdf')
+    downloadBlob(data, 'resume.pdf', 'application/pdf')
+  } catch (e) {
+    alert('导出失败: ' + await readApiError(e))
   }
 }
 
@@ -155,6 +202,39 @@ function downloadBlob(blob, filename, type) {
     background var(--transition),
     border-color var(--transition),
     transform var(--transition);
+}
+.render-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+.render-input {
+  flex: 1;
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 13px;
+  background: var(--bg-white);
+  color: var(--text);
+}
+.render-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-subtle);
+}
+.toolbar-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.toolbar-btn.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.toolbar-btn.primary:hover {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
 }
 .toolbar-btn:hover {
   background: var(--primary-soft);

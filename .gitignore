@@ -24,3 +24,9 @@ scripts/feishu_doc.pdf
 
 # Boss 直聘浏览器登录态与运行时数据（含 Cookie/会话/缓存，勿提交）
 backend/boss/.boss_profile/
+
+# RAG 评估结果
+data/evaluation/
+
+# 参考项目（Boss 自动化参考，不上传公开仓库）
+boss_ai_reference/

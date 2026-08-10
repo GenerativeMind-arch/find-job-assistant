@@ -1,19 +1,19 @@
 /* ========== Global Reset & Design System ========== */
 :root {
-  /* Primary */
-  --primary: #2563eb;
-  --primary-hover: #1d4ed8;
-  --primary-soft: #dbeafe;
-  --primary-subtle: #eff6ff;
+  /* Primary — 浅蓝（Sky）主题 */
+  --primary: #0ea5e9;
+  --primary-hover: #0284c7;
+  --primary-soft: #bae6fd;
+  --primary-subtle: #e0f2fe;
 
   /* Backgrounds */
-  --bg: #f4f7fc;
+  --bg: #f0f9ff;
   --bg-white: #ffffff;
-  --surface: #f8fafc;
+  --surface: #f5fbff;
 
   /* Borders */
-  --border: #e2e8f0;
-  --border-strong: #cbd5e1;
+  --border: #dbeafe;
+  --border-strong: #bae6fd;
 
   /* Text */
   --text: #0f172a;

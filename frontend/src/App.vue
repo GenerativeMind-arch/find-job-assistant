@@ -60,6 +60,7 @@
         :interview-qa="interviewQa"
         :triggered-agents="triggeredAgents"
         @imported="handleBossImported"
+        @resume-rendered="handleResumeRendered"
       />
     </div>
   </div>
@@ -188,6 +189,12 @@ function applyResponse(data) {
       resultPanelRef.value?.setTab('interview')
     })
   }
+}
+
+/** 简历渲染调整后更新 resume_html / render_config */
+function handleResumeRendered({ resume_html, render_config }) {
+  if (resume_html) resumeHtml.value = resume_html
+  if (render_config) renderConfig.value = render_config
 }
 
 /** Boss 岗位导入工作流后：切换对话面板、写入 job、自动触发分析流水线。 */

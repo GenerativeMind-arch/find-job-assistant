@@ -37,6 +37,17 @@
       </button>
     </div>
 
+    <!-- AI 自动求职（AgentLoop，可选高级功能） -->
+    <div class="agent-row">
+      <input v-model="agentGoal" class="input" placeholder="AI 自动求职指令，如：搜索广州 Python 岗位，只搜不投" @keyup.enter="runAgent" />
+      <button class="btn btn-primary" :disabled="agentRunning || !agentGoal.trim() || !status.browser_running" @click="runAgent">
+        {{ agentRunning ? '执行中...' : 'AI 自动求职' }}
+      </button>
+    </div>
+    <div v-if="agentResult" class="agent-result">
+      <pre>{{ agentResult }}</pre>
+    </div>
+
     <!-- Tab 切换 -->
     <div class="sub-tabs">
       <button v-for="tab in subTabs" :key="tab.key" :class="['sub-tab', { active: activeSubTab === tab.key }]" @click="activeSubTab = tab.key">
@@ -91,22 +102,48 @@
 
     <!-- 会话 -->
     <div v-show="activeSubTab === 'conversations'" class="sub-content">
-      <div class="conv-list" v-if="conversations.length">
-        <div v-for="conv in conversations" :key="conv.id" class="conv-card" :class="{ unread: conv.has_unreplied }" @click="selectConversation(conv)">
-          <div class="conv-header">
-            <span class="conv-name">{{ conv.hr_name }}</span>
-            <span class="conv-interest" v-if="conv.interest_level" :class="'interest-' + conv.interest_level">{{ conv.interest_level }}</span>
+      <!-- 会话列表 -->
+      <template v-if="!currentConversation">
+        <div class="conv-list" v-if="conversations.length">
+          <div v-for="conv in conversations" :key="conv.id" class="conv-card" :class="{ unread: conv.has_unreplied }" @click="selectConversation(conv)">
+            <div class="conv-header">
+              <span class="conv-name">{{ conv.hr_name }}</span>
+              <span class="conv-interest" v-if="conv.interest_level" :class="'interest-' + conv.interest_level">{{ conv.interest_level }}</span>
+            </div>
+            <div class="conv-meta">
+              <span v-if="conv.job_title">{{ conv.job_title }}</span>
+              <span v-if="conv.hr_company">{{ conv.hr_company }}</span>
+            </div>
+            <div class="conv-last" v-if="conv.last_message_text">{{ conv.last_message_text }}</div>
           </div>
-          <div class="conv-meta">
-            <span v-if="conv.job_title">{{ conv.job_title }}</span>
-            <span v-if="conv.hr_company">{{ conv.hr_company }}</span>
-          </div>
-          <div class="conv-last" v-if="conv.last_message_text">{{ conv.last_message_text }}</div>
         </div>
-      </div>
-      <div v-else class="empty-hint">
-        <p>暂无会话。启动浏览器并开启自动回复后，HR 消息会自动出现在这里。</p>
-      </div>
+        <div v-else class="empty-hint">
+          <p>暂无会话。启动浏览器并开启自动回复后，HR 消息会自动出现在这里。</p>
+        </div>
+      </template>
+
+      <!-- 会话详情 -->
+      <template v-else>
+        <div class="conv-detail-header">
+          <button class="btn btn-secondary btn-sm" @click="backToConversations">← 返回</button>
+          <span class="conv-detail-name">{{ currentConversation.hr_name }}</span>
+          <span v-if="currentConversation.job_title" class="conv-detail-job">{{ currentConversation.job_title }}</span>
+        </div>
+        <div class="conv-messages" v-if="currentMessages.length">
+          <div v-for="(m, i) in currentMessages" :key="i" class="msg-bubble" :class="m.sender === 'me' ? 'me' : 'hr'">
+            <div class="msg-sender">{{ m.sender === 'me' ? '我' : 'HR' }}</div>
+            <div class="msg-text">{{ m.content }}</div>
+            <div class="msg-time" v-if="m.created_at">{{ m.created_at }}</div>
+          </div>
+        </div>
+        <div v-else class="empty-hint"><p>暂无消息</p></div>
+        <div class="conv-send-row">
+          <input v-model="sendMessageText" class="input" placeholder="输入消息..." @keyup.enter="sendConversationMessage" />
+          <button class="btn btn-primary" :disabled="sendingMsg || !sendMessageText.trim()" @click="sendConversationMessage">
+            {{ sendingMsg ? '发送中...' : '发送' }}
+          </button>
+        </div>
+      </template>
     </div>
 
     <!-- 统计 -->
@@ -172,8 +209,8 @@ import {
   bossStatus, bossStart, bossStop, bossRelogin, bossHeartbeat,
   bossPauseMonitor, bossResumeMonitor,
   bossSearchJobs, bossListJobs, bossApply, bossScanAndApply, bossScanPage, bossAnalyze,
-  bossConversations, bossStats, bossGetSettings, bossUpdateSettings,
-  bossImportJob,
+  bossConversations, bossConversationMessages, bossSendMessage, bossStats, bossGetSettings, bossUpdateSettings,
+  bossImportJob, bossAgentRun,
 } from '../../api/index.js'
 
 const props = defineProps({
@@ -272,6 +309,19 @@ async function searchJobs() {
   finally { loading.value = false }
 }
 
+/** 供父组件联动调用：从对话区"搜索岗位"触发 Boss 搜索 */
+async function performSearch(keyword = '') {
+  if (!status.browser_running) {
+    alert('BOSS 浏览器未启动，请先点击「启动浏览器」')
+    return
+  }
+  activeSubTab.value = 'search'
+  if (keyword) searchForm.value.keyword = keyword
+  await searchJobs()
+}
+
+defineExpose({ performSearch })
+
 async function scanPage() {
   loading.value = true
   try {
@@ -368,8 +418,64 @@ async function saveSettings() {
   finally { loading.value = false }
 }
 
-function selectConversation(conv) {
-  // Future: open conversation detail
+// ── 会话详情与发消息 ──
+const currentConversation = ref(null)
+const currentMessages = ref([])
+const sendMessageText = ref('')
+const sendingMsg = ref(false)
+
+async function selectConversation(conv) {
+  currentConversation.value = conv
+  try {
+    const { data } = await bossConversationMessages(conv.id, 100)
+    currentMessages.value = data.messages || []
+  } catch (e) {
+    alert('加载会话失败: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
+function backToConversations() {
+  currentConversation.value = null
+  currentMessages.value = []
+  sendMessageText.value = ''
+}
+
+async function sendConversationMessage() {
+  if (!currentConversation.value || !sendMessageText.value.trim()) return
+  sendingMsg.value = true
+  const content = sendMessageText.value.trim()
+  sendMessageText.value = ''
+  try {
+    await bossSendMessage(currentConversation.value.id, content)
+    // 重新加载消息
+    const { data } = await bossConversationMessages(currentConversation.value.id, 100)
+    currentMessages.value = data.messages || []
+  } catch (e) {
+    alert('发送失败: ' + (e.response?.data?.detail || e.message))
+  } finally {
+    sendingMsg.value = false
+  }
+}
+
+// ── AI 自动求职（AgentLoop）──
+const agentGoal = ref('')
+const agentRunning = ref(false)
+const agentResult = ref('')
+
+async function runAgent() {
+  if (!agentGoal.value.trim()) return
+  agentRunning.value = true
+  agentResult.value = ''
+  const goal = agentGoal.value.trim()
+  try {
+    const { data } = await bossAgentRun(goal, 12)
+    const summary = data.summary || data.result || JSON.stringify(data).slice(0, 500)
+    agentResult.value = typeof summary === 'string' ? summary : JSON.stringify(summary, null, 2)
+  } catch (e) {
+    alert('Agent 执行失败: ' + (e.response?.data?.detail || e.message))
+  } finally {
+    agentRunning.value = false
+  }
 }
 
 onMounted(() => {
@@ -464,6 +570,38 @@ onUnmounted(() => {
 .job-actions { display: flex; gap: 6px; margin-top: 8px; }
 .tag { font-size: 11px; padding: 2px 8px; border-radius: 4px; }
 .tag-boss { background: #fef3c7; color: #92400e; }
+
+.agent-row { display: flex; gap: 8px; align-items: center; }
+.agent-result {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  max-height: 200px;
+  overflow: auto;
+  color: var(--text-secondary);
+}
+.agent-result pre { margin: 0; white-space: pre-wrap; word-break: break-all; }
+
+.conv-detail-header {
+  display: flex; align-items: center; gap: 10px;
+  padding-bottom: 10px; border-bottom: 1px solid var(--border);
+}
+.conv-detail-name { font-weight: 600; font-size: 14px; }
+.conv-detail-job { font-size: 12px; color: var(--text-light); }
+.conv-messages {
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 320px; overflow-y: auto; padding: 8px 0;
+}
+.msg-bubble {
+  max-width: 78%; padding: 8px 12px; border-radius: 10px; font-size: 13px;
+}
+.msg-bubble.hr { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); }
+.msg-bubble.me { align-self: flex-end; background: var(--primary); color: #fff; }
+.msg-sender { font-size: 11px; opacity: 0.8; margin-bottom: 3px; }
+.msg-time { font-size: 10px; opacity: 0.65; margin-top: 3px; }
+.conv-send-row { display: flex; gap: 8px; margin-top: 8px; }
 
 .conv-list { display: flex; flex-direction: column; gap: 6px; }
 .conv-card {

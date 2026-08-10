@@ -16,21 +16,10 @@
     <div class="chat-messages" ref="messagesContainer">
       <div v-if="messages.length === 0" class="chat-empty">
         <div class="empty-icon">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
         </div>
         <p class="empty-title">开始对话吧</p>
-        <p class="empty-desc">你可以粘贴岗位描述、上传简历，我来帮你分析匹配</p>
-        <div class="empty-suggestions">
-          <div class="suggestion-chip" @click="$emit('send', 'AI Agent应用开发工程师 北京')">
-            🔍 搜索岗位
-          </div>
-          <div class="suggestion-chip" @click="$emit('send', '帮我分析简历匹配度')">
-            📊 匹配分析
-          </div>
-          <div class="suggestion-chip" @click="$emit('send', '准备面试问答')">
-            💬 面试准备
-          </div>
-        </div>
+        <p class="empty-desc">粘贴岗位描述、上传简历，逐步完成岗位分析 · 简历定制 · 面试准备</p>
       </div>
 
       <div
@@ -238,7 +227,7 @@ function removeFile(index) {
   width: 34px;
   height: 34px;
   border-radius: 10px;
-  background: linear-gradient(135deg, var(--primary), #3b82f6);
+  background: linear-gradient(135deg, var(--primary), #38bdf8);
   color: #fff;
   display: flex;
   align-items: center;
@@ -300,30 +289,6 @@ function removeFile(index) {
   max-width: 280px;
   line-height: 1.5;
 }
-.empty-suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: center;
-}
-.suggestion-chip {
-  padding: 8px 16px;
-  border-radius: var(--radius-full);
-  background: var(--bg-white);
-  border: 1px solid var(--border);
-  font-size: 13px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all var(--transition);
-}
-.suggestion-chip:hover {
-  border-color: var(--primary);
-  color: var(--primary);
-  background: var(--primary-subtle);
-  box-shadow: var(--shadow);
-  transform: translateY(-1px);
-}
-
 /* ── Message Items ── */
 .message-item {
   display: flex;

@@ -17,18 +17,18 @@
       <transition name="tab-fade" mode="out-in">
         <ProjectIntro v-if="activeTab === 'intro'" key="intro" />
         <JobAnalysis v-else-if="activeTab === 'job'" :job="job" :gaps="gaps" :session-id="sessionId" key="job" />
-        <ResumePreview v-else-if="activeTab === 'resume'" :resume-html="resumeHtml" :session-id="sessionId" key="resume" />
+        <ResumePreview v-else-if="activeTab === 'resume'" :resume-html="resumeHtml" :session-id="sessionId" @rendered="onResumeRendered" key="resume" />
         <GapsPanel v-else-if="activeTab === 'gaps'" :gaps="gaps" :questions="questions" :session-id="sessionId" key="gaps" />
         <InterviewPanel v-else-if="activeTab === 'interview'" :interview-qa="interviewQa" :session-id="sessionId" :job="job" key="interview" />
         <DebugPanel v-else-if="activeTab === 'debug'" :session-id="sessionId" :resume-content="resumeContent" :render-config="renderConfig" :triggered-agents="triggeredAgents" key="debug" />
-        <BossPanel v-else-if="activeTab === 'boss'" :session-id="sessionId" @imported="onBossImported" key="boss" />
+        <BossPanel ref="bossPanelRef" v-else-if="activeTab === 'boss'" :session-id="sessionId" @imported="onBossImported" key="boss" />
       </transition>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import ProjectIntro from './tabs/ProjectIntro.vue'
 import JobAnalysis from './tabs/JobAnalysis.vue'
 import ResumePreview from './tabs/ResumePreview.vue'
@@ -49,11 +49,16 @@ const props = defineProps({
   triggeredAgents: Array,
 })
 
-const emit = defineEmits(['imported'])
+const emit = defineEmits(['imported', 'resume-rendered'])
+const bossPanelRef = ref(null)
 
 function onBossImported(payload) {
-  // Boss 岗位导入工作流后，通知 App.vue 切换到对话区并自动触发分析
   emit('imported', payload)
+}
+
+/** 简历渲染调整后，把最新 resume_html / render_config 上抛给 App.vue */
+function onResumeRendered(payload) {
+  emit('resume-rendered', payload)
 }
 
 /** 供父组件（App.vue）切换标签页 */
@@ -61,7 +66,13 @@ function setTab(tabKey) {
   if (typeof tabKey === 'string') activeTab.value = tabKey
 }
 
-defineExpose({ setTab })
+/** 供父组件触发 Boss 标签页搜索（联动"搜索岗位"按钮） */
+function triggerBossSearch(keyword = '') {
+  activeTab.value = 'boss'
+  return nextTick().then(() => bossPanelRef.value?.performSearch(keyword))
+}
+
+defineExpose({ setTab, triggerBossSearch })
 
 const activeTab = ref('intro')
 
