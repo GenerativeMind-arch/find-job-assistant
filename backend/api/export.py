@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api", tags=["export"])
 
 class ExportRequest(BaseModel):
     session_id: str
-    format: str = "html"  # html / json / markdown / txt / md
+    format: str = "html"  # html / json / markdown / txt / md / pdf
     target: str = "resume"  # resume / job / gaps / interview
 
 
@@ -321,5 +321,21 @@ async def export_resume(req: ExportRequest):
         raise HTTPException(status_code=404, detail="会话不存在")
 
     state = CopilotState.model_validate(saved)
+
+    # PDF 导出：需要异步渲染（Playwright），单独处理
+    if (
+        (req.target or "resume").strip().lower() == "resume"
+        and (req.format or "").strip().lower() == "pdf"
+    ):
+        if not state.resume_html.html:
+            raise HTTPException(status_code=404, detail="简历 HTML 尚未生成，请先生成简历")
+        from services.pdf_exporter import ahtml_to_pdf_bytes
+        pdf_bytes = await ahtml_to_pdf_bytes(state.resume_html.html)
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'attachment; filename="resume.pdf"'},
+        )
+
     content, media_type, filename = _export_target(state, req.target, req.format)
     return _build_response(content, media_type, filename)

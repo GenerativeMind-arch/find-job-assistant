@@ -108,13 +108,18 @@ class KnowledgeBase:
         }
 
     @staticmethod
-    async def search(query: str, top_n: int = 5) -> str:
+    async def search(query: str, top_n: int = 5, collection_name: str | None = None) -> str:
         """
         检索知识库并返回格式化的上下文字符串。
         对外统一入口，供 Agent 直接调用。
+
+        Args:
+            query: 检索查询
+            top_n: 返回条数
+            collection_name: 指定 collection（默认 interview_knowledge）
         """
         from services.rag_retriever import RAGRetriever
-        return await RAGRetriever.retrieve_context(query, top_n=top_n)
+        return await RAGRetriever.retrieve_context(query, top_n=top_n, collection_name=collection_name)
 
     @staticmethod
     def get_stats() -> dict:

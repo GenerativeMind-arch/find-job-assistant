@@ -88,6 +88,8 @@ class InterviewEngine:
         profile_json = profile.model_dump_json(indent=2) if profile else "{}"
 
         # 2. 知识库检索（岗位 + 技能关键词）
+        #    优先检索大厂 LLM 面试题库 collection（llm_interview_knowledge），
+        #    让出题贴近头部大厂真实面试侧重点
         kb_context = ""
         try:
             query_parts = [job_title]
@@ -95,8 +97,12 @@ class InterviewEngine:
                 query_parts.extend(job.keywords[:3])
             if job and job.hard_skills:
                 query_parts.extend(job.hard_skills[:2])
-            query = " ".join(p for p in query_parts if p) or "面试经验"
-            kb_context = await KnowledgeBase.search(query, top_n=5)
+            query = " ".join(p for p in query_parts if p) or "大模型面试"
+            kb_context = await KnowledgeBase.search(
+                query, top_n=5, collection_name="llm_interview_knowledge",
+            )
+            if not kb_context.strip():
+                kb_context = await KnowledgeBase.search(query, top_n=5)
         except Exception as exc:
             logger.warning("Interview KB search failed: %s", exc)
 
@@ -336,12 +342,20 @@ class InterviewEngine:
         )
 
     async def _judge_turn(self, state: InterviewSessionState, turn: InterviewTurn) -> JudgeOutput:
-        """针对单轮回答做知识库检索 + Judge 评分（用于统一评分阶段）。"""
+        """针对单轮回答做知识库检索 + Judge 评分（用于统一评分阶段）。
+
+        优先检索大厂 LLM 面试题库，校准评分标准；题库无结果时回退默认知识库。
+        """
         kb_context = ""
         try:
             kb_context = await KnowledgeBase.search(
-                f"{state.job_title} {turn.question.category} {turn.question.question}", top_n=3
+                f"{state.job_title} {turn.question.category} {turn.question.question}",
+                top_n=3, collection_name="llm_interview_knowledge",
             )
+            if not kb_context.strip():
+                kb_context = await KnowledgeBase.search(
+                    f"{state.job_title} {turn.question.category} {turn.question.question}", top_n=3
+                )
         except Exception:
             pass
         return await self.judge.evaluate(

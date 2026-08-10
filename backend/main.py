@@ -88,15 +88,15 @@ async def _init_knowledge_base() -> None:
     """启动时初始化知识库（ChromaDB Collection 和目录）。"""
     try:
         from services.rag_retriever import _get_collection
-        from config_loader import get_knowledge_base_config
+        from config_loader import get_knowledge_base_config, resolve_data_path
 
         kb_config = get_knowledge_base_config()
-        persist_dir = kb_config.get("chroma_persist_dir", "data/chroma_db")
-        data_dir = kb_config.get("data_directory", "data/knowledge_base")
+        persist_dir = resolve_data_path(kb_config.get("chroma_persist_dir", "data/chroma_db"))
+        data_dir = resolve_data_path(kb_config.get("data_directory", "data/knowledge_base"))
 
         # 确保目录存在
-        Path(BACKEND_DIR.parent / persist_dir).mkdir(parents=True, exist_ok=True)
-        Path(BACKEND_DIR.parent / data_dir).mkdir(parents=True, exist_ok=True)
+        Path(persist_dir).mkdir(parents=True, exist_ok=True)
+        Path(data_dir).mkdir(parents=True, exist_ok=True)
 
         # 初始化 Collection
         collection = _get_collection()

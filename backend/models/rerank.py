@@ -6,6 +6,47 @@ from typing import Any
 from config_loader import get_rerank_config
 
 
+class _DashScopeRerankV2:
+    """阿里云 DashScope `gte-rerank-v2` 排序模型适配器。
+
+    langchain_community 的 DashScopeRerank 走旧端点（.../text-rerank/generation），
+    而 gte-rerank-v2 使用独立端点 `.../text-rerank/text-rerank` 与嵌套请求体，
+    因此这里用 httpx 直接调用。
+
+    API 参考: https://help.aliyun.com/zh/model-studio/text-rerank-api
+    """
+
+    _URL = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+
+    def __init__(self, model_name: str, api_key: str):
+        self._model = model_name
+        self._api_key = api_key
+
+    def rerank(self, documents: list[str], query: str, top_n: int) -> list[dict]:
+        import httpx
+
+        payload = {
+            "model": self._model,
+            "input": {"query": query, "documents": list(documents)},
+            "parameters": {"return_documents": True, "top_n": top_n},
+        }
+        headers = {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}
+        resp = httpx.post(self._URL, json=payload, headers=headers, timeout=60)
+        resp.raise_for_status()
+        data = resp.json()
+        results = data.get("output", {}).get("results", [])
+        ranked: list[dict] = []
+        for item in results:
+            try:
+                idx = int(item.get("index"))
+                score = float(item.get("relevance_score"))
+                ranked.append({"index": idx, "relevance_score": score})
+            except (TypeError, ValueError):
+                continue
+        ranked.sort(key=lambda x: x["relevance_score"], reverse=True)
+        return ranked[:top_n]
+
+
 class _HuggingFaceCrossEncoderReranker:
     """本地 CrossEncoder 适配为统一 rerank 输出格式。"""
 
@@ -66,12 +107,8 @@ def get_reranker() -> Any:
     provider = _normalize_provider(cfg.get("provider", "dashscope"))
 
     if provider in {"dashscope", "tongyi"}:
-        from langchain_community.document_compressors.dashscope_rerank import DashScopeRerank
-
-        kwargs = {"model": cfg["model"]}
-        if cfg.get("api_key"):
-            kwargs["dashscope_api_key"] = cfg["api_key"]
-        return DashScopeRerank(**kwargs)
+        # gte-rerank-v2 使用独立端点，langchain 旧适配器不兼容，用自研适配器
+        return _DashScopeRerankV2(cfg["model"], cfg.get("api_key", ""))
 
     if provider in {"cohere"}:
         if not cfg.get("api_key"):

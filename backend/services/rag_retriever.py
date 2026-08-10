@@ -26,8 +26,9 @@ def _get_chroma_client():
         return _chroma_client
     try:
         import chromadb
+        from config_loader import resolve_data_path
         kb_config = get_knowledge_base_config()
-        persist_dir = kb_config.get("chroma_persist_dir", "data/chroma_db")
+        persist_dir = resolve_data_path(kb_config.get("chroma_persist_dir", "data/chroma_db"))
         _chroma_client = chromadb.PersistentClient(path=persist_dir)
         logger.info("ChromaDB client initialized at %s", persist_dir)
     except Exception as exc:

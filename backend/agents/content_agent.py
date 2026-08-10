@@ -90,12 +90,30 @@ async def content_node_async(state: CopilotState) -> dict[str, Any]:
     intent = state.current_intent
     llm = get_llm()
 
+    # ── 简历制作知识库检索（cv_knowledge collection）──
+    # 基于目标岗位检索简历书写指导，注入 prompt 提升内容质量
+    kb_context = ""
+    try:
+        from services.knowledge_base import KnowledgeBase
+        query_parts = []
+        if state.job:
+            query_parts.append(state.job.title or "")
+            if getattr(state.job, "keywords", None):
+                query_parts.extend(state.job.keywords[:3])
+        query = " ".join(p for p in query_parts if p) or "简历制作"
+        kb_context = await KnowledgeBase.search(
+            f"{query} 简历 STAR 项目经历", top_n=5, collection_name="cv_knowledge",
+        )
+    except Exception as exc:
+        logger.warning("Resume KB search failed: %s", exc)
+
     if intent == "content_edit" and state.resume_content_json:
         # 局部更新
         prompt = RESUME_SECTION_UPDATE_PROMPT.format(
             current_resume_json=state.resume_content_json.model_dump_json(indent=2),
             job_json=state.job.model_dump_json(indent=2) if state.job else "{}",
             edit_instruction=state.user_message,
+            knowledge_context=kb_context or "（知识库无相关简历指导内容）",
         )
     else:
         # 全量生成
@@ -110,6 +128,7 @@ async def content_node_async(state: CopilotState) -> dict[str, Any]:
             job_json=job_json,
             profile_json=profile_json,
             edit_instruction=edit_instruction,
+            knowledge_context=kb_context or "（知识库无相关简历指导内容）",
         )
 
     try:

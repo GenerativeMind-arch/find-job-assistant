@@ -1,4 +1,7 @@
-"""文件解析工具 — 支持 PDF / DOCX / Markdown / TXT。"""
+"""文件解析工具 — 支持 PDF / DOCX / Markdown / TXT / 图片 / 扫描件PDF。
+
+图片（.png/.jpg/.jpeg）和扫描件 PDF 通过 qwen-vl-ocr 视觉模型识别。
+"""
 
 from __future__ import annotations
 
@@ -9,7 +12,10 @@ from log import get_logger
 
 logger = get_logger("app")
 
-_SUPPORTED_UPLOAD_SUFFIXES = {".pdf", ".docx", ".txt", ".md"}
+_SUPPORTED_UPLOAD_SUFFIXES = {".pdf", ".docx", ".txt", ".md", ".png", ".jpg", ".jpeg"}
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
+# 扫描件判定阈值：pdfplumber 提取文本少于该字符数则视为扫描件，走 OCR
+_SCANNED_PDF_MIN_CHARS = 100
 
 # 解析4种文件：pdf、docx、md、txt。对于API上传的内容，支持根据filename后缀解析bytes数据。
 def parse_file(file_path: str | Path) -> str:
@@ -33,7 +39,10 @@ def parse_content(content: str, filename: str = "") -> str:
 
 
 def parse_content_bytes(data: bytes, filename: str = "") -> str:
-    """解析内存中的文件内容。"""
+    """解析内存中的文件内容。
+
+    支持 PDF（文本型/扫描件）、DOCX、MD/TXT、图片（qwen-vl-ocr 识别）。
+    """
     suffix = Path(filename).suffix.lower() if filename else ""
     if suffix == ".pdf":
         return _parse_pdf_bytes(data)
@@ -41,6 +50,8 @@ def parse_content_bytes(data: bytes, filename: str = "") -> str:
         return _parse_docx_bytes(data)
     if suffix in (".md", ".txt", ""):
         return data.decode("utf-8")
+    if suffix in _IMAGE_SUFFIXES:
+        return _parse_image_bytes(data)
     raise ValueError(f"Unsupported file type: {suffix}")
 
 
@@ -70,14 +81,35 @@ def _parse_pdf(path: Path) -> str:
 
 
 def _parse_pdf_bytes(data: bytes) -> str:
+    """解析 PDF：文本型用 pdfplumber；扫描件（文本不足阈值）降级 qwen-vl-ocr。"""
     import pdfplumber
+
     text_parts = []
     with pdfplumber.open(io.BytesIO(data)) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
             if text:
                 text_parts.append(text)
-    return "\n\n".join(text_parts)
+    text_result = "\n\n".join(text_parts)
+
+    # 文本太少 → 判定为扫描件，走 qwen-vl-ocr 逐页识别
+    if len(text_result.strip()) < _SCANNED_PDF_MIN_CHARS:
+        logger.info("PDF 文本量过低（%d 字符），判定为扫描件，调用 qwen-vl-ocr", len(text_result.strip()))
+        from services.vision_ocr import qwen_vl_ocr_pdf
+        ocr_text = qwen_vl_ocr_pdf(data)
+        if ocr_text.strip():
+            return ocr_text
+        return text_result  # OCR 失败时回退原始文本
+    return text_result
+
+
+def _parse_image_bytes(data: bytes) -> str:
+    """解析图片（简历截图/拍照）：调用 qwen-vl-ocr 识别。"""
+    from services.vision_ocr import qwen_vl_ocr_image
+    text = qwen_vl_ocr_image(data)
+    if not text.strip():
+        raise ValueError("图片识别失败：未能提取出有效文字，请尝试上传更清晰的简历图片")
+    return text
 
 
 def _parse_docx(path: Path) -> str:

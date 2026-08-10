@@ -10,6 +10,12 @@ RESUME_GENERATION_PROMPT = """你是一个专业的简历内容生成专家。�
 
 {edit_instruction}
 
+## 知识库参考（简历制作指导，基于真实简历书写经验）
+{knowledge_context}
+
+请结合上述知识库中的简历制作技巧（如 STAR 法则、相关性优先、量化成果等），
+生成优化后的简历内容。
+
 机器协议：
 - 返回且仅返回一个合法 JSON 对象
 - 不要输出 Markdown、代码块、注释或额外说明
@@ -93,6 +99,11 @@ RESUME_SECTION_UPDATE_PROMPT = """你是简历内容编辑专家。请根据用�
 
 用户修改指令：
 {edit_instruction}
+
+## 知识库参考（简历制作指导）
+{knowledge_context}
+
+请结合上述知识库中的简历书写技巧，优化受影响的 section。
 
 机器协议：
 - 返回且仅返回一个合法 JSON 对象

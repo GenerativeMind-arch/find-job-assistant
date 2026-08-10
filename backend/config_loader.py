@@ -6,6 +6,7 @@
 """
 
 import os
+import sys
 from pathlib import Path
 
 import yaml
@@ -14,6 +15,7 @@ from dotenv import dotenv_values
 _config: dict | None = None
 _dotenv: dict | None = None
 _BACKEND_DIR = Path(__file__).resolve().parent
+_PROJECT_DIR = _BACKEND_DIR.parent
 
 
 def _resolve_env_override(env_var_name: str, default: str = "") -> str:
@@ -68,6 +70,22 @@ def get_config() -> dict:
 # ------------------------------------------------------------------
 # 各模块便捷配置访问
 # ------------------------------------------------------------------
+
+def resolve_data_path(configured: str) -> str:
+    """解析数据目录路径，兼容 Docker 与本地 Windows。
+
+    config.yaml 使用 Docker 风格绝对路径（如 `/data/chroma_db`，依赖卷挂载）。
+    在本地 Windows 上，`/data/chroma_db` 会被 `Path()` 解析为盘符根目录
+    （如 `D:\\data\\chroma_db`），与项目 `data/` 目录错位。
+    这里在 Windows 上把 `/data/xxx` 重映射到 `<项目根>/data/xxx`；
+    Linux / Docker 环境保持原样。
+    """
+    if not configured:
+        return configured
+    if sys.platform == "win32" and configured.startswith("/data"):
+        return str(_PROJECT_DIR / "data" / Path(configured).name)
+    return configured
+
 
 def get_server_config() -> dict:
     """返回服务端连接配置（host）。"""
