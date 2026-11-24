@@ -569,13 +569,13 @@ async def apply_job(job_url: str) -> dict:
     if not ctx.has_browser():
         return {"error": "浏览器未启动"}
 
-    # 日限检查
+    # 日限检查（唯一权威：自适应预算）
     try:
-        from boss_state import get_today_application_count, get_setting
+        from boss_state import get_apply_allowance
 
-        daily_limit = int(get_setting("daily_apply_limit", "15"))
-        if get_today_application_count() >= daily_limit:
-            return {"error": f"今日投递已达上限 ({daily_limit}条)"}
+        allowance = get_apply_allowance()
+        if allowance["remaining"] <= 0:
+            return {"error": allowance["reason"] or f"今日投递已达额度 ({allowance['budget']}条)"}
     except Exception:
         pass
 
@@ -601,13 +601,13 @@ async def apply_job(job_url: str) -> dict:
 
     try:
 
-        def _do():
-            return ctx.automation.apply_to_job(_norm_url(job_url), greeting)
+        from boss.manager import BossManager
 
-        result = await ctx.run_pw(_do)
+        manager = BossManager.get_instance()
+        async with manager.lock_browser():
+            result = await manager.apply_job_async(_norm_url(job_url), greeting)
         return {
-            "success": result.get("success", False),
-            "message": result.get("message", ""),
+            **result,
             "greeting_used": greeting[:80],
         }
     except Exception as e:
@@ -630,25 +630,28 @@ async def batch_apply(job_urls: str) -> dict:
         return {"error": "job_urls 为空"}
 
     try:
-        from boss_state import get_today_application_count, get_setting
+        from boss_state import get_apply_allowance
 
-        daily_limit = int(get_setting("daily_apply_limit", "15"))
-        remaining = daily_limit - get_today_application_count()
-        urls = urls[:max(1, remaining)]
+        remaining = get_apply_allowance()["remaining"]
+        urls = urls[: max(0, remaining)]
     except Exception:
         pass
 
     try:
+        # 走 manager 的异步编排：每条一次 run_pw（单条有上限），拟人停顿在异步层。
+        # 旧写法把整批塞进一次 run_pw，而这里用的是默认 180s —— 正常批次（条间
+        # 45-120s 停顿）都会超时被误判成"线程卡死"；反过来设成大超时又会重演
+        # 一条卡住、整条线程被占几十分钟的老问题。
+        from boss.manager import BossManager, summarize_apply_results
 
-        def _do():
-            return ctx.automation.apply_batch([_norm_url(u) for u in urls])
-
-        results = await ctx.run_pw(_do)
-        success = sum(1 for r in results if r.get("success"))
+        mgr = BossManager.get_instance()
+        async with mgr.lock_browser():
+            results = await mgr.apply_batch_async([_norm_url(u) for u in urls])
+        summary = summarize_apply_results(results, len(urls))
         return {
             "total": len(urls),
-            "success": success,
-            "failed": len(results) - success,
+            "success": summary["applied"],
+            **summary,
             "detail": [r.get("message", "") for r in results if not r.get("success")][:5],
         }
     except Exception as e:
@@ -766,13 +769,16 @@ async def generate_reply(conv_id: int) -> dict:
 async def get_status() -> dict:
     ctx = ToolContext.get()
     try:
-        from boss_state import get_setting, get_today_application_count
+        from boss_state import get_apply_allowance, get_setting, get_today_application_count
 
+        allowance = get_apply_allowance()
         return {
             "browser_running": ctx.has_browser(),
             "auto_reply_enabled": get_setting("auto_reply_enabled", "false") == "true",
             "today_applied": get_today_application_count(),
-            "daily_limit": get_setting("daily_apply_limit", "15"),
+            # 今日**当前**预算（自适应，会涨会缩），不是设置页那个固定值
+            "daily_limit": allowance["budget"],
+            "apply_budget": allowance,
             "default_city": get_setting("default_city", "全国"),
         }
     except Exception as e:

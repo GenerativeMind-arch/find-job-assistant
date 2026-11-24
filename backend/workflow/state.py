@@ -234,9 +234,18 @@ class CopilotState(BaseModel):
     current_intent: str = ""
     execution_plan: list[str] = Field(default_factory=list)       # 旧格式（兼容）：agent 名称列表
     reply_message: str = ""
+    notice: str = ""          # 本轮前置条件提醒，不持久化。
     triggered_agents: list[str] = Field(default_factory=list)
     workflow_trace: list[WorkflowTraceItem] = Field(default_factory=list)
 
     # ---- Plan Mode 运行时字段（不持久化）----
     active_plan_id: str = ""
     plan_result: Optional[Any] = Field(default=None, description="PlanResult — 本轮 Plan 执行结果")
+
+    def to_session_snapshot(self) -> dict[str, Any]:
+        """Serialize session data shared by chat, rendering and job import."""
+        return self.model_dump(exclude={
+            "user_message", "user_attachments", "current_intent", "execution_plan",
+            "reply_message", "notice", "triggered_agents", "workflow_trace",
+            "active_plan_id", "plan_result",
+        })

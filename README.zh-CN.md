@@ -187,6 +187,31 @@ npm run dev
 # → http://localhost:3000
 ```
 
+#### Windows 本机接入观测云
+
+确认 DataKit 的 OpenTelemetry 采集器监听 `127.0.0.1:4317`。
+当前本机实例在 `backend/.env` 中使用
+`FASTAPI_HOST=127.0.0.1` 和 `FASTAPI_PORT=8001`。
+在项目根目录启动后端。
+
+```powershell
+$env:OTEL_EXPORTER_OTLP_ENDPOINT='http://127.0.0.1:4317'
+$env:OTEL_SERVICE_NAME='interview-assistant-pycharm'
+.venv/Scripts/python.exe backend/main.py
+```
+
+在另一个终端的 `frontend` 目录启动 Vite。
+
+```powershell
+$env:INTERVIEW_API_TARGET='http://127.0.0.1:8001'
+npm.cmd run dev -- --host 127.0.0.1 --port 3002 --strictPort
+```
+
+访问 [本机求职助手](http://127.0.0.1:3002/)。
+访问 `/health` 可生成一条 Trace 和一条关联的 INFO 请求日志。
+在 DataKit 绑定的观测云工作空间中，按服务名 `interview-assistant-pycharm` 筛选。
+遥测使用 HTTP 方法、路由模板和状态码。
+
 ### 6 ·（可选）构建知识库
 
 RAG 知识库由扫描件 PDF 构建：

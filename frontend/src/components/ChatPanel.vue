@@ -1,25 +1,17 @@
 <template>
   <div class="chat-panel">
-    <div class="chat-header">
-      <div class="header-left">
-        <span class="brand-logo">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-        </span>
-        <div>
-          <div class="header-title">Interview Assistant</div>
-          <div class="header-subtitle">AI 求职助手</div>
-        </div>
-      </div>
-    </div>
+    <header class="chat-header"><h2>求职对话</h2></header>
 
     <!-- 消息列表 -->
-    <div class="chat-messages" ref="messagesContainer">
+    <div class="chat-messages" ref="messagesContainer" role="log" aria-label="对话消息">
       <div v-if="messages.length === 0" class="chat-empty">
-        <div class="empty-icon">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        <h3 class="empty-title">先从一个目标岗位开始</h3>
+        <p class="empty-desc">提供岗位描述或已有简历，助手会帮你分析匹配度、完善简历并准备面试。</p>
+        <div class="starter-actions">
+          <button type="button" @click="inputEl?.focus()">粘贴岗位描述</button>
+          <button type="button" @click="fileInput?.click()">上传简历</button>
+          <button type="button" @click="emit('open-boss')">打开 BOSS 岗位</button>
         </div>
-        <p class="empty-title">开始对话吧</p>
-        <p class="empty-desc">粘贴岗位描述、上传简历，逐步完成岗位分析 · 简历定制 · 面试准备</p>
       </div>
 
       <div
@@ -48,8 +40,8 @@
       <div v-if="loading" class="message-item assistant">
         <div class="message-avatar assistant">A</div>
         <div class="message-body">
-          <div class="typing-indicator">
-            <span></span><span></span><span></span>
+          <div class="typing-indicator" role="status">
+            正在处理
           </div>
         </div>
       </div>
@@ -57,35 +49,38 @@
 
     <!-- 输入区 -->
     <div class="chat-input-area">
+      <p v-if="notice" class="chat-notice" role="status">{{ notice }}</p>
       <!-- 附件预览 -->
       <div v-if="pendingFiles.length" class="pending-files">
         <div v-for="(f, i) in pendingFiles" :key="i" class="pending-file-tag">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           {{ f.filename }}
-          <button class="remove-file" @click="removeFile(i)">×</button>
+          <button class="remove-file" :aria-label="'移除附件 ' + f.filename" @click="removeFile(i)">×</button>
         </div>
       </div>
 
       <div class="input-row">
-        <label class="upload-btn" title="上传附件">
+        <button type="button" class="upload-btn" title="上传附件" aria-label="上传附件" @click="fileInput?.click()">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-          <input
-            type="file"
-            multiple
-            accept=".pdf,.docx,.txt,.md"
-            @change="onFileSelect"
-            style="display:none"
-          />
-        </label>
+        </button>
+        <input
+          ref="fileInput"
+          type="file"
+          multiple
+          accept=".pdf,.docx,.txt,.md"
+          hidden
+          @change="onFileSelect"
+        />
         <textarea
           ref="inputEl"
           v-model="inputText"
-          placeholder="搜索岗位、粘贴 JD、上传简历..."
+          aria-label="输入求职消息"
+          placeholder="粘贴岗位描述，或输入你的问题"
           rows="1"
           @keydown="onKeydown"
           @input="autoResize"
         ></textarea>
-        <button class="send-btn" @click="doSend" :disabled="loading || !inputText.trim() && !pendingFiles.length">
+        <button class="send-btn" aria-label="发送消息" @click="doSend" :disabled="loading || !inputText.trim() && !pendingFiles.length">
           <svg v-if="!loading" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
           <span v-else class="sending-text">发送中</span>
         </button>
@@ -102,14 +97,16 @@ import DOMPurify from '../utils/purify.js'
 const props = defineProps({
   messages: Array,
   loading: Boolean,
+  notice: String,
 })
 
-const emit = defineEmits(['send', 'upload'])
+const emit = defineEmits(['send', 'upload', 'open-boss'])
 
 const inputText = ref('')
 const pendingFiles = ref([])
 const messagesContainer = ref(null)
 const inputEl = ref(null)
+const fileInput = ref(null)
 const renderCache = new Map()
 const maxCacheSize = 120
 
@@ -151,7 +148,7 @@ function renderContent(text) {
 }
 
 function onKeydown(e) {
-  if (e.key === 'Enter' && !e.shiftKey) {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
     e.preventDefault()
     doSend()
   }
@@ -211,84 +208,64 @@ function removeFile(index) {
   background: var(--bg-white);
 }
 
-/* ── Header ── */
 .chat-header {
-  padding: 16px 22px;
+  display: flex;
+  align-items: center;
+  min-height: 60px;
+  padding: 12px clamp(16px, 2vw, 26px);
   border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-  background: rgba(255, 255, 255, 0.96);
 }
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.brand-logo {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, var(--primary), #38bdf8);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2);
-}
-.header-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text);
-  line-height: 1.3;
-}
-.header-subtitle {
-  font-size: 12px;
-  color: var(--text-light);
-  line-height: 1.3;
-}
+.chat-header h2 { font-size: 15px; font-weight: 650; }
 
-/* ── Messages ── */
 .chat-messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 16px 18px;
-  background: linear-gradient(180deg, #ffffff 0%, var(--surface) 100%);
+  padding: 18px clamp(16px, 2vw, 28px);
 }
-
-/* ── Empty State ── */
 .chat-empty {
+  min-height: 100%;
+  max-width: 32rem;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
-  align-items: center;
   justify-content: center;
-  padding: 50px 24px;
-  text-align: center;
-  animation: fadeInUp 0.4s ease;
-  height: 100%;
-}
-.empty-icon {
-  width: 60px;
-  height: 60px;
-  border-radius: 20px;
-  background: var(--primary-subtle);
-  color: var(--primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 16px;
+  padding: 16px 4px 36px;
 }
 .empty-title {
-  font-size: 17px;
-  font-weight: 600;
-  color: var(--text);
-  margin-bottom: 6px;
+  font-size: clamp(23px, 2.2vw, 34px);
+  font-weight: 720;
+  line-height: 1.28;
+  letter-spacing: -0.035em;
 }
 .empty-desc {
-  font-size: 13px;
-  color: var(--text-light);
-  margin-bottom: 24px;
-  max-width: 280px;
-  line-height: 1.5;
+  margin-top: 12px;
+  max-width: 29ch;
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 1.7;
 }
+.starter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 22px;
+}
+.starter-actions button {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-weight: 550;
+  transition: background var(--transition), border-color var(--transition);
+}
+.starter-actions button:first-child {
+  background: var(--primary-subtle);
+  color: var(--primary-hover);
+  border-color: var(--primary-soft);
+}
+.starter-actions button:hover { background: var(--primary-subtle); border-color: var(--primary); }
 /* ── Message Items ── */
 .message-item {
   display: flex;
@@ -510,36 +487,27 @@ function removeFile(index) {
   justify-content: flex-end;
 }
 
-/* ── Typing Indicator ── */
 .typing-indicator {
-  display: flex;
-  gap: 5px;
-  padding: 12px 16px;
-  background: #fff;
-  border: 1px solid var(--border);
+  padding: 10px 14px;
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  color: var(--primary-hover);
+  background: var(--primary-subtle);
+  font-size: 13px;
 }
-.typing-indicator span {
-  width: 7px;
-  height: 7px;
-  background: var(--primary);
-  border-radius: 50%;
-  animation: typing 1.2s ease-in-out infinite;
-}
-.typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
-.typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
-@keyframes typing {
-  0%, 60%, 100% { opacity: 0.25; transform: scale(0.7); }
-  30% { opacity: 1; transform: scale(1); }
-}
-
 /* ── Input Area ── */
 .chat-input-area {
   border-top: 1px solid var(--border);
   padding: 12px 16px 14px;
   flex-shrink: 0;
-  background: rgba(255, 255, 255, 0.98);
+  background: var(--bg-white);
+}
+.chat-notice {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--primary);
+  background: var(--primary-subtle);
+  color: var(--text-secondary);
+  line-height: 1.5;
 }
 .pending-files {
   display: flex;
@@ -557,6 +525,8 @@ function removeFile(index) {
   display: flex;
   align-items: center;
   gap: 6px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .remove-file {
   background: none;
@@ -575,11 +545,11 @@ function removeFile(index) {
   gap: 8px;
 }
 .upload-btn {
-  height: 40px;
-  width: 40px;
+  height: 44px;
+  width: 44px;
   cursor: pointer;
   border: 1px solid var(--border);
-  border-radius: 50%;
+  border-radius: var(--radius);
   color: var(--text-light);
   background: var(--bg-white);
   display: inline-flex;
@@ -598,13 +568,13 @@ function removeFile(index) {
   resize: none;
   min-width: 0;
   padding: 10px 16px;
-  border-radius: 20px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   line-height: 1.5;
   max-height: 120px;
   background: var(--surface);
   transition: all var(--transition);
-  font-size: 13.5px;
+  font-size: 16px;
 }
 .input-row textarea:focus {
   border-color: var(--primary);
@@ -615,10 +585,10 @@ function removeFile(index) {
   color: var(--text-light);
 }
 .send-btn {
-  min-width: 40px;
-  height: 40px;
-  width: 40px;
-  border-radius: 50%;
+  min-width: 44px;
+  height: 44px;
+  padding: 0 10px;
+  border-radius: var(--radius);
   background: var(--primary);
   color: #fff;
   display: flex;
@@ -626,12 +596,9 @@ function removeFile(index) {
   justify-content: center;
   flex-shrink: 0;
   transition: all var(--transition);
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.2);
 }
 .send-btn:hover:not(:disabled) {
   background: var(--primary-hover);
-  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.3);
-  transform: translateY(-1px) scale(1.05);
 }
 .send-btn:disabled {
   opacity: 0.4;
@@ -639,7 +606,12 @@ function removeFile(index) {
   box-shadow: none;
 }
 .sending-text {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
+}
+@media (max-width: 600px) {
+  .chat-header { min-height: 48px; }
+  .chat-input-area { padding: 10px; }
+  .chat-empty { padding-bottom: 16px; }
 }
 </style>

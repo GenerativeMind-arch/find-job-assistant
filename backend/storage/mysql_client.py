@@ -36,6 +36,15 @@ async def get_mysql_pool() -> aiomysql.Pool:
     return _pool
 
 
+async def close_mysql_pool() -> None:
+    """Release the pool on the same event loop that served requests."""
+    global _pool
+    pool, _pool = _pool, None
+    if pool is not None:
+        pool.close()
+        await pool.wait_closed()
+
+
 class MySQLStore:
     """MySQL 异步持久化操作封装。"""
 

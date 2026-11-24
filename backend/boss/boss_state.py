@@ -195,6 +195,12 @@ def init_db():
         db.execute("ALTER TABLE applications ADD COLUMN embedding TEXT DEFAULT ''")
     except sqlite3.OperationalError:
         pass
+    # 自适应投递预算的状态（JSON）。存在 daily_stats 里是为了白拿"按日重置"——
+    # 那一行以本地日期为主键，换一天自然读到空值。只有预算模块读写这一列。
+    try:
+        db.execute("ALTER TABLE daily_stats ADD COLUMN apply_budget_state TEXT")
+    except sqlite3.OperationalError:
+        pass
     # 面试会话持久化（支持暂停/恢复）
     db.executescript("""
         CREATE TABLE IF NOT EXISTS interview_sessions (
@@ -246,11 +252,33 @@ def init_db():
         "greeting_template": "您好！看到贵司在招{job_title}，很感兴趣。PS：正在和你聊天的这个AI工具是我自己开发的——就当是我的技术名片了",
         "greeting_enabled": "true",
         "ai_greeting_enabled": "true",
+        # 自有定制话术（第二条消息）：点「立即沟通」后平台会自动发出它自己的招呼语，
+        # 这一项控制我们随后是否再补发一条按 JD 定制的。默认关闭 —— 先手工验证
+        # 会话定位准确了再打开（见 docs/boss_search_and_greeting_fix_plan.md 3.4）
+        "custom_greeting_enabled": "false",
+        "custom_greeting_delay_min_sec": "4",   # 与平台那条的间隔，太密易触发风控
+        "custom_greeting_delay_max_sec": "8",
+        "custom_greeting_max_len": "120",
+        # 本地相关性重排/过滤。BOSS 搜索是分词宽泛匹配（搜"AI开发"会混进只在 JD 里
+        # 提过 AI 的岗位），而搜索页没有排序控件、服务端没有可用排序参数，只能在本地做。
+        "relevance_rank_enabled": "true",     # 按相关性重排（只改顺序，不删岗位）
+        "relevance_filter_enabled": "false",  # 额外按阈值过滤掉低于 min_score 的
+        "relevance_min_score": "3",           # 3 分 = 标题至少命中一个关键词 token
+        # LLM 复核：token 命中判断不了语义（搜"Agent开发"时"大模型应用工程师"字面不命中），
+        # 整批岗位交给 deepseek-flash 复核一遍，只删明显不相关的。失败时一条都不删。
+        "relevance_llm_enabled": "true",
         "ai_reply_style": "professional",
+        # daily_apply_limit 在动态模式下是**起步额度**（不再是硬上限）：
+        # 一路顺利会涨到 apply_daily_max，撞风控会收缩。关掉动态就退回旧的固定行为。
         "daily_apply_limit": "15",
+        "apply_dynamic_enabled": "true",
+        "apply_daily_max": "50",
         "auto_reply_enabled": "false",
+        # 已废弃：监控循环改为双节拍后不再读取这两个键，保留仅为兼容旧配置
         "min_reply_delay_sec": "20",
         "max_reply_delay_sec": "40",
+        "scan_interval_sec": "3600",      # 未读消息扫描周期：1 小时
+        "heartbeat_interval_sec": "120",  # 心跳/保活周期：2 分钟
         "batch_delay_min_sec": "45",
         "batch_delay_max_sec": "120",
         "batch_rest_every": "8",
@@ -394,13 +422,29 @@ def list_applications(status: Optional[str] = None, limit: int = 50) -> List[dic
     return result
 
 
-def update_application_status(app_id: int, status: str, greeting_text: Optional[str] = None):
+def update_application_status(
+    app_id: int,
+    status: str,
+    greeting_text: Optional[str] = None,
+    greeting_sent: bool = False,
+):
+    """更新岗位状态；`greeting_sent` 表示「这一次确实把招呼语发出去了」。
+
+    为什么单列一个参数，而不是靠 greeting_text 的真假推断：平台自己在 BOSS 后台
+    配的招呼语是**没有文本**的（点了「立即沟通」平台就发了），定制话术又默认关闭。
+    早先的实现写成 `if greeting_text:` 才写 greeting_sent_at，于是正常投递路径
+    永远不写这个字段 → get_today_application_count() 恒为 0 → **每日投递上限彻底
+    失效**，一键投递可以一直投下去直到账号被风控。
+
+    greeting_text 传空/None 时保留库中原值（用 COALESCE），避免"只点了投递、没有
+    自定义话术"把之前记下的文本抹掉。
+    """
     db = get_db()
-    if greeting_text:
+    if greeting_sent or greeting_text:
         db.execute(
-            """UPDATE applications SET status=?, greeting_text=?, greeting_sent_at=CURRENT_TIMESTAMP,
-               updated_at=CURRENT_TIMESTAMP WHERE id=?""",
-            (status, greeting_text, app_id),
+            """UPDATE applications SET status=?, greeting_text=COALESCE(?, greeting_text),
+               greeting_sent_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+            (status, greeting_text or None, app_id),
         )
     else:
         db.execute(
@@ -411,9 +455,20 @@ def update_application_status(app_id: int, status: str, greeting_text: Optional[
 
 
 def get_today_application_count() -> int:
+    """今日已投递数 —— 直接决定「一键投递」还能投几个。
+
+    坑：这些列都是 `DEFAULT CURRENT_TIMESTAMP`，SQLite 存的是 **UTC**。原先写成
+    `date(greeting_sent_at)=date('now','localtime')`，等于拿 UTC 的日期去比本地的
+    日期 —— 在 UTC+8 下，本地 00:00~08:00 之间的投递其 UTC 日期还是"昨天"，
+    于是**不计入今日上限**：凌晨投递可以突破每日上限，界面上的「今日投递 N/20」
+    也会偏小。必须先把存储值转成本地时间再比。
+    """
     row = (
         get_db()
-        .execute("SELECT COUNT(*) as cnt FROM applications WHERE date(greeting_sent_at)=date('now','localtime')")
+        .execute(
+            "SELECT COUNT(*) as cnt FROM applications "
+            "WHERE date(greeting_sent_at,'localtime')=date('now','localtime')"
+        )
         .fetchone()
     )
     return row["cnt"] if row else 0
@@ -424,11 +479,157 @@ def get_today_pending_count() -> int:
     return row["cnt"] if row else 0
 
 
+# ══════════════════════════════════════
+#  自适应投递预算（唯一权威）
+# ══════════════════════════════════════
+#
+# 改造前，"今天还能投几个"在五处各算各的：boss_automation.apply_to_job（唯一带
+# MAX_APPLY_PER_DAY 夹逼的闸门）、api/boss.py 三处、agent/tools.py 两处。它们的
+# 默认值和上限都不一样。现在全部改读 get_apply_allowance()，预算策略集中在
+# boss_apply_budget 里。
+
+def _apply_budget_row():
+    """今日那一行 daily_stats（惰性建行）。"""
+    _ensure_today()
+    return get_db().execute("SELECT * FROM daily_stats WHERE date=?", (_today(),)).fetchone()
+
+
+def _budget_base() -> int:
+    """起步额度 —— 复用设置页那颗「每日投递上限」，动态模式下它不再是硬上限。"""
+    from boss_apply_budget import BASE_BUDGET
+
+    try:
+        return int(get_setting("daily_apply_limit", str(BASE_BUDGET)) or BASE_BUDGET)
+    except (TypeError, ValueError):
+        return BASE_BUDGET
+
+
+def _budget_ceiling() -> int:
+    """动态上限 —— 用户可在设置页调小，已经涨上去的预算会被夹回来。"""
+    from boss_apply_budget import MAX_BUDGET
+
+    try:
+        return int(get_setting("apply_daily_max", str(MAX_BUDGET)) or MAX_BUDGET)
+    except (TypeError, ValueError):
+        return MAX_BUDGET
+
+
+def _read_budget_state():
+    """读今日预算状态（已按当前起步值/上限夹逼）。"""
+    from boss_apply_budget import load_state
+
+    row = _apply_budget_row()
+    raw = row["apply_budget_state"] if row else None
+    return load_state(raw, base=_budget_base(), ceiling=_budget_ceiling())
+
+
+def _write_budget_state(state) -> None:
+    from boss_apply_budget import dump_state
+
+    _ensure_today()
+    db = get_db()
+    db.execute(
+        "UPDATE daily_stats SET apply_budget_state=? WHERE date=?",
+        (dump_state(state), _today()),
+    )
+    db.commit()
+
+
+def _dynamic_enabled() -> bool:
+    return get_setting("apply_dynamic_enabled", "true") == "true"
+
+
+def get_apply_allowance() -> dict:
+    """今天还能投几个 —— 全部投递路径的唯一权威。
+
+    返回 {budget, applied, remaining, base, max, strikes, delay_multiplier,
+          dynamic, day_over, reason}。
+
+    动态模式关闭时退化成旧的固定行为：budget = daily_apply_limit，倍率恒为 1.0。
+    """
+    from boss_apply_budget import (
+        delay_multiplier as _delay_multiplier,
+        remaining as _remaining,
+    )
+
+    applied = get_today_application_count()
+
+    if not _dynamic_enabled():
+        fixed = int(get_setting("daily_apply_limit", "15") or 15)
+        return {
+            "budget": fixed,
+            "applied": applied,
+            "remaining": max(0, fixed - applied),
+            "base": fixed,
+            "max": fixed,
+            "strikes": 0,
+            "delay_multiplier": 1.0,
+            "dynamic": False,
+            "day_over": applied >= fixed,
+            "reason": "" if applied < fixed else "已达今日上限",
+        }
+
+    state = _read_budget_state()
+    base = _budget_base()
+    max_budget = _budget_ceiling()
+    left = _remaining(state, applied)
+    reason = ""
+    if left <= 0:
+        reason = "今日预算已用完"
+    elif state.strikes:
+        reason = f"今日已触发 {state.strikes} 次风控，预算收缩至 {state.budget}"
+    return {
+        "budget": state.budget,
+        "applied": applied,
+        "remaining": left,
+        "base": base,
+        "max": max_budget,
+        "strikes": state.strikes,
+        "delay_multiplier": _delay_multiplier(state),
+        "dynamic": True,
+        "day_over": left <= 0,
+        "reason": reason,
+    }
+
+
+def report_apply_success() -> None:
+    """一次成功投递 —— 攒够干净次数就加码。失败不影响投递本身。"""
+    if not _dynamic_enabled():
+        return
+    try:
+        from boss_apply_budget import on_success
+
+        _write_budget_state(on_success(_read_budget_state(), ceiling=_budget_ceiling()))
+    except Exception as e:  # noqa: BLE001
+        print(f"[budget] 记录成功失败（不影响投递）: {e}")
+
+
+def report_apply_risk(category: str) -> None:
+    """撞了一次风控 —— 按类别收缩预算。失败不影响投递本身。"""
+    if not _dynamic_enabled():
+        return
+    try:
+        from boss_apply_budget import on_risk
+
+        state = on_risk(
+            _read_budget_state(), category, get_today_application_count(), ceiling=_budget_ceiling()
+        )
+        _write_budget_state(state)
+        print(
+            f"[budget] 风控({category}) → 今日预算收缩至 {state.budget}"
+            f"（已投 {get_today_application_count()}）"
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"[budget] 记录风控失败（不影响投递）: {e}")
+
+
 def count_hours_replied_in_range(hours: int) -> int:
     row = (
         get_db()
         .execute(
-            "SELECT COUNT(*) as cnt FROM conversations WHERE last_message_from='hr' AND datetime(last_message_at) > datetime('now','localtime',? || ' hours')",
+            # 同理：last_message_at 是 UTC，必须先转本地再跟本地阈值比，
+            # 否则"近 N 小时"的窗口整体偏移一个时区。
+            "SELECT COUNT(*) as cnt FROM conversations WHERE last_message_from='hr' AND datetime(last_message_at,'localtime') > datetime('now','localtime',? || ' hours')",
             (f"-{hours}",),
         )
         .fetchone()
@@ -741,6 +942,15 @@ def add_message(
     return cur.lastrowid
 
 
+def get_message(message_id: int) -> Optional[dict]:
+    """按 id 取单条消息。
+
+    写完一条消息后回读它，可以让调用方拿到落库后的 id/created_at，
+    而不是自己拼一个时间戳 —— 前端据此本地追加，省掉一次全量拉取。
+    """
+    return _row_to_dict(get_db().execute("SELECT * FROM messages WHERE id=?", (message_id,)).fetchone())
+
+
 def get_messages(conversation_id: int, limit: int = 50) -> List[dict]:
     return _rows_to_list(
         get_db()
@@ -887,10 +1097,13 @@ def get_daily_stats(date_str: Optional[str] = None) -> dict:
 
 
 def get_today_auto_reply_count() -> int:
+    """今日 AI 自动回复条数。同 get_today_application_count：created_at 是 UTC，
+    必须先转本地再比日期，否则凌晨那段时间会算到昨天去。"""
     row = (
         get_db()
         .execute(
-            "SELECT COUNT(*) as cnt FROM messages WHERE ai_generated=1 AND date(created_at)=date('now','localtime')"
+            "SELECT COUNT(*) as cnt FROM messages WHERE ai_generated=1 "
+            "AND date(created_at,'localtime')=date('now','localtime')"
         )
         .fetchone()
     )

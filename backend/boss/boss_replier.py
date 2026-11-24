@@ -117,6 +117,13 @@ SYSTEM_PROMPT = """你是一个求职者开发的AI助手，在BOSS直聘上帮�
 - 不承诺薪资、入职时间——"这些可以后续和本人详细聊"
 - 不要重复寒暄，不要每一轮都自我介绍
 
+## 结尾标记（强制，不得遗漏）
+- 每条回复的最后都必须另起一行、原样附上固定标记：[AI助手回复]
+- 这个标记很短，是 AI 回复的固定标识，直接跟上即可，不要为它铺垫、道歉或额外解释，不会让对方反感
+- 不要改写、翻译、加空格或标点，也不要漏掉
+- 输出到 JSON 的 "reply" 字段时也要包含，例如：
+{"reply": "……回复正文……\n[AI助手回复]", "interest": "high/medium/low"}
+
 ## 面试处理（重要）
 - 当HR提到"线下面试""现场面试""到面""面聊""面谈"等要求时，表示接受但说明需要统计地点：
   回复方向："可以接受线下面试。我先帮您登记一下面试地点，求职者本人会整理好线下面试的安排，有什么需要了解的我可以继续帮您沟通~"
@@ -214,7 +221,7 @@ def build_reply_context(
     return "\n".join(parts)
 
 
-def generate_reply(
+def _generate_reply_raw(
     conversation_id: int,
     hr_message: str,
     job_info: dict,
@@ -223,7 +230,9 @@ def generate_reply(
     wechat_id: str = "",
 ) -> dict:
     """
-    根据 HR 消息生成 AI 回复和兴趣度评估。
+    根据 HR 消息生成 AI 回复和兴趣度评估（不含 AI 身份标记）。
+
+    对外请调用 generate_reply —— 它会补上 [AI助手回复] 标记。
     返回 {"reply": str, "interest": str, "transfer": bool}，失败时返回 {"reply": "", "interest": "", "transfer": False}.
     """
     if not hr_message or len(hr_message.strip()) < 1:
@@ -307,8 +316,49 @@ def generate_reply(
         return {"reply": reply, "interest": interest, "transfer": False}
 
     except Exception as e:
-        print(f"  ⚠️ generate_reply error: {e}")
+        print(f"  ⚠️ _generate_reply_raw error: {e}")
         return {"reply": "", "interest": "", "transfer": False}
+
+
+# AI 身份标记：每条自动回复末尾固定带上，让 HR 一眼知道对面是 AI。
+# 提示词里也强制要求模型输出它（SYSTEM_PROMPT「结尾标记」块），这里是代码层兜底。
+AI_REPLY_MARKER = "[AI助手回复]"
+_MAX_REPLY_LEN = 300
+
+
+def _append_ai_marker(reply: str) -> str:
+    """给自动回复统一追加 AI 身份标记；幂等，且含标记总长不超过 _MAX_REPLY_LEN。"""
+    if not reply:
+        return reply
+    reply = reply.rstrip()
+    if reply.endswith(AI_REPLY_MARKER):
+        return reply  # 模型已经自己带了，不重复追加
+    body_limit = _MAX_REPLY_LEN - len(AI_REPLY_MARKER) - 1  # 预留一个换行
+    if len(reply) > body_limit:
+        reply = reply[:body_limit].rstrip()
+    return f"{reply}\n{AI_REPLY_MARKER}"
+
+
+def generate_reply(
+    conversation_id: int,
+    hr_message: str,
+    job_info: dict,
+    style: str = "professional",
+    resume_summary: str = "",
+    wechat_id: str = "",
+) -> dict:
+    """
+    根据 HR 消息生成 AI 回复和兴趣度评估。
+
+    与 _generate_reply_raw 的唯一区别：非空回复会在末尾加上 [AI助手回复] 标记。
+    所有自动回复调用点都应走这里；手动发送与招呼语不经过本函数，因此不带标记。
+    """
+    result = _generate_reply_raw(
+        conversation_id, hr_message, job_info, style, resume_summary, wechat_id
+    )
+    if result.get("reply"):
+        result["reply"] = _append_ai_marker(result["reply"])
+    return result
 
 
 def generate_greeting(

@@ -48,7 +48,9 @@ async def _classify_intent_async(state: CopilotState) -> IntentClassificationOut
         has_resume=state.resume_content_json is not None,
         user_message=state.user_message,
     )
-    llm = get_llm()
+    # 分类输出很短，bind 一个较小的 max_tokens，避免按全局 8192 上限生成。
+    # 用 bind 局部覆盖，不影响共享实例上的长文生成。
+    llm = get_llm().bind(max_tokens=800)
     result = await ainvoke_json_with_schema(
         llm, prompt, IntentClassificationOutput, logger, "Planner Agent"
     )
@@ -78,6 +80,21 @@ def _looks_like_job_title(text: str) -> bool:
     if len(stripped) > 120:
         return False
     return any(kw in stripped for kw in _JOB_TITLE_KEYWORDS)
+
+
+# ── 寒暄快路径 ──────────────────────────────────────────────
+# 整句就是问候/客套时直接回话，省掉一次意图分类 LLM 调用（实测 ~7s）
+_SMALLTALK_INPUTS = {
+    "你好", "您好", "您好呀", "hi", "hello", "hey", "嗨", "哈喽",
+    "在吗", "在么", "在不在", "早上好", "早安", "中午好", "下午好", "晚上好", "晚安",
+    "谢谢", "多谢", "感谢", "thanks", "thank you", "3q",
+}
+
+
+def _is_smalltalk(text: str) -> bool:
+    """Heuristic：整句话就是寒暄（去标点后完全匹配）→ 走快路径。"""
+    normalized = text.strip().lower().strip("!！。.,，、~～:：;；?？ 　")
+    return normalized in _SMALLTALK_INPUTS
 
 
 # ── Boss 导入岗位流水线触发关键词 ────────────────────────
@@ -118,6 +135,35 @@ def _force_search_jd_if_short_job_title(primary: str, state: CopilotState) -> st
         )
         return "search_jd"
     return primary
+
+
+# ── 前置条件检查：这些意图缺材料就无法产出有意义的结果 ──
+# 典型：用户直接说"分析这个岗位"，但没有岗位 / 没有上传简历 → 空跑昂贵的 LLM 链路
+_PROFILE_REQUIRED_INTENTS = {"gap_analysis", "content_edit", "import_boss_job"}
+
+
+def _missing_requirements(primary: str, state: CopilotState) -> list[str]:
+    """返回缺失的前置条件，可能包含 'job' / 'profile'。"""
+    missing: list[str] = []
+    if primary == "gap_analysis" and state.job is None:
+        missing.append("job")
+    if primary in _PROFILE_REQUIRED_INTENTS and state.candidate_profile is None:
+        missing.append("profile")
+    return missing
+
+
+def _build_missing_notice(missing: list[str], primary: str) -> str:
+    """把缺失项转成给用户看的提醒文案。"""
+    todo = []
+    if "job" in missing:
+        todo.append("目标岗位 —— 直接发一个职位名搜索，或从「BOSS」页搜索后点「导入岗位」")
+    if "profile" in missing:
+        todo.append("你的简历/项目材料 —— 点输入框旁的上传按钮传一份")
+    what = "岗位分析" if primary == "gap_analysis" else "这一步"
+    return (
+        f"还差这些信息才能做{what}：\n· " + "\n· ".join(todo)
+        + "\n\n补齐后再发一句，我就开始。"
+    )
 
 
 def _build_execution_plan(intent: str, secondary: list[str], state: CopilotState) -> list[str]:
@@ -375,6 +421,29 @@ async def planner_node_async(state: CopilotState) -> dict[str, Any]:
     """
     logger.info("Planner Agent started for session %s", state.session_id)
 
+    # 0. 寒暄快路径：整句就是问候 → 跳过 LLM 分类与 RAG，直接回话
+    if _is_smalltalk(state.user_message):
+        logger.info("Smalltalk fast-path: skipping LLM intent classification")
+        return {
+            "reply_message": (
+                "你好！我是 Interview Assistant，可以帮你：\n"
+                "· 搜岗位 —— 直接发职位名，如「Python 开发工程师 北京」\n"
+                "· 传简历/项目材料，生成针对岗位定制的简历\n"
+                "· 做岗位差距分析、模拟面试\n"
+                "把需求发我就行。"
+            ),
+            "current_intent": "ask_question",
+            "execution_plan": [],
+            "triggered_agents": [],
+            "workflow_trace": append_trace(
+                state,
+                node="planner",
+                input_summary=f"寒暄：{summarize_user_message(state.user_message)}",
+                output_summary="寒暄快路径直接回复（跳过 LLM 分类与 RAG）",
+                artifacts={"intent": "smalltalk", "fast_path": True},
+            ),
+        }
+
     # 1. 意图分类
     try:
         intent_result = await _classify_intent_async(state)
@@ -416,6 +485,26 @@ async def planner_node_async(state: CopilotState) -> dict[str, Any]:
             "Boss-imported job heuristic: forced intent=import_boss_job (msg=%s)",
             state.user_message[:40],
         )
+
+    # ── 前置条件检查：缺岗位/简历时明确提醒，而不是空跑昂贵链路 ──
+    missing = _missing_requirements(primary, state)
+    if missing:
+        notice = _build_missing_notice(missing, primary)
+        logger.info("Precondition missing for intent=%s: %s", primary, missing)
+        return {
+            "reply_message": notice,
+            "notice": notice,
+            "current_intent": primary,
+            "execution_plan": [],
+            "triggered_agents": [],
+            "workflow_trace": append_trace(
+                state,
+                node="planner",
+                input_summary=f"前置条件不足：{missing}（intent={primary}）",
+                output_summary=notice,
+                artifacts={"intent": primary, "missing": missing},
+            ),
+        }
 
     # ── search_jd 特殊处理：搜索 JD 并返回结果 ──
     if primary == "search_jd":

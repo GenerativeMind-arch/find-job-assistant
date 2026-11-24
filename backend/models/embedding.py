@@ -6,6 +6,10 @@ from typing import Any
 from config_loader import get_embedding_config
 
 
+# 模块级单例：对齐 models/llm.py 的 get_llm()，避免每次检索都重建客户端
+_embedding_instance: Any | None = None
+
+
 def _normalize_provider(provider: str) -> str:
     return (provider or "dashscope").strip().lower()
 
@@ -80,20 +84,29 @@ def _create_huggingface_embedding(cfg: dict) -> Any:
 
 
 def get_embedding_model() -> Any:
-    """根据 embedding.provider 返回对应 Embedding 实例。"""
+    """根据 embedding.provider 返回对应 Embedding 实例（进程内缓存复用）。"""
+    global _embedding_instance
+    if _embedding_instance is not None:
+        return _embedding_instance
+
     cfg = get_embedding_config()
     provider = _normalize_provider(cfg.get("provider", "dashscope"))
 
     if provider in {"dashscope", "tongyi"}:
-        return _create_dashscope_embedding(cfg)
+        _embedding_instance = _create_dashscope_embedding(cfg)
+        return _embedding_instance
     if provider in {"openai", "deepseek", "qwen", "openai_compatible"}:
-        return _create_openai_embedding(cfg)
+        _embedding_instance = _create_openai_embedding(cfg)
+        return _embedding_instance
     if provider in {"azure_openai", "azure"}:
-        return _create_azure_openai_embedding(cfg)
+        _embedding_instance = _create_azure_openai_embedding(cfg)
+        return _embedding_instance
     if provider in {"ollama", "local"}:
-        return _create_ollama_embedding(cfg)
+        _embedding_instance = _create_ollama_embedding(cfg)
+        return _embedding_instance
     if provider in {"huggingface", "hf", "sentence_transformers"}:
-        return _create_huggingface_embedding(cfg)
+        _embedding_instance = _create_huggingface_embedding(cfg)
+        return _embedding_instance
 
     raise ValueError(
         "Unsupported embedding.provider='{}'. Supported providers: dashscope, openai, "

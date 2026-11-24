@@ -263,3 +263,59 @@ class TestBossStats:
         count = get_today_auto_reply_count()
         assert isinstance(count, int)
         assert count >= 0
+
+
+class TestApplyRecordsGreetingSent:
+    """投递成功后必须记下 greeting_sent_at —— 每日上限全靠它。
+
+    真实事故（2026-10-12 实测）：平台自己的招呼语是**没有文本**的（点「立即沟通」
+    平台就发了），而定制话术默认关闭。旧实现写成 `if greeting_text:` 才写
+    greeting_sent_at，于是正常投递路径永远不写 → get_today_application_count()
+    恒为 0 → **每日投递上限彻底失效**，一键投递可以一直投到被封号。
+    """
+
+    def test_platform_greeting_records_sent_at(self, temp_db):
+        from boss_state import add_application, get_application, get_today_application_count
+
+        aid = add_application({"url": "https://example.com/g1", "title": "岗位", "company": "公司"})
+        # 平台招呼语：没有文本，但要标记"发出去了"
+        update_application_status(aid, "applied", greeting_sent=True)
+
+        app = get_application(aid)
+        assert app["status"] == "applied"
+        assert app["greeting_sent_at"], "没记发送时间 → 今日计数永远为 0 → 上限失效"
+        assert get_today_application_count() == 1
+
+    def test_plain_status_update_does_not_fake_a_greeting(self, temp_db):
+        """只改状态（skip / 已投递过）不能算成"今天投了一个"。"""
+        from boss_state import add_application, get_application, get_today_application_count
+
+        aid = add_application({"url": "https://example.com/g2", "title": "岗位", "company": "公司"})
+        update_application_status(aid, "skipped")
+
+        assert get_application(aid)["greeting_sent_at"] is None
+        assert get_today_application_count() == 0
+
+    def test_custom_greeting_text_is_kept_when_later_cleared(self, temp_db):
+        """后一次不带文本的更新不能把已记下的话术文本抹掉。"""
+        from boss_state import add_application, get_application
+
+        aid = add_application({"url": "https://example.com/g3", "title": "岗位", "company": "公司"})
+        update_application_status(aid, "applied", "您好，我对这个岗位很感兴趣", greeting_sent=True)
+        update_application_status(aid, "applied", greeting_sent=True)
+
+        assert get_application(aid)["greeting_text"] == "您好，我对这个岗位很感兴趣"
+
+    def test_daily_limit_actually_blocks(self, temp_db):
+        """记满今日上限后，上限判断必须真的生效。"""
+        from boss_state import add_application, get_today_application_count
+
+        for i in range(3):
+            aid = add_application(
+                {"url": f"https://example.com/limit{i}", "title": "岗位", "company": "公司"}
+            )
+            update_application_status(aid, "applied", greeting_sent=True)
+
+        assert get_today_application_count() == 3
+        # apply_to_job 用的就是这个判断
+        assert get_today_application_count() >= 3

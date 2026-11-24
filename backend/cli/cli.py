@@ -83,14 +83,14 @@ def heartbeat_cmd():
 
 @main.command("monitor-pause")
 def monitor_pause_cmd():
-    """暂停自动回复监控。"""
+    """停止自动回复（持久化，等同前端「停止回复」按钮）。"""
     resp = client.monitor_pause()
     output.emit(output.ok_or_fail(resp, "monitor-pause"))
 
 
 @main.command("monitor-resume")
 def monitor_resume_cmd():
-    """恢复自动回复监控。"""
+    """恢复自动回复（持久化，并立即触发一轮未读扫描）。"""
     resp = client.monitor_resume()
     output.emit(output.ok_or_fail(resp, "monitor-resume"))
 
@@ -98,7 +98,7 @@ def monitor_resume_cmd():
 # ── 搜索 ──
 @main.command("search")
 @click.argument("keyword")
-@click.option("--city", default="", help="城市名（空则使用设置中的默认城市）")
+@click.option("--city", default="", help="城市名（空 = 全国）")
 @click.option("--welfare", default=None, help="福利筛选 如 双休,五险一金")
 @click.option("--count", type=int, default=60, help="返回条数上限")
 def search_cmd(keyword, city, welfare, count):
@@ -150,7 +150,7 @@ def apply_batch_cmd(filter_status):
 
 @main.command("scan-apply")
 def scan_apply_cmd():
-    """扫描当前页面全部岗位并一键批量投递。"""
+    """把岗位库里待投递（pending）的岗位一键批量投递。"""
     resp = client.scan_and_apply()
     output.emit(output.ok_or_fail(resp, "scan-apply"))
 

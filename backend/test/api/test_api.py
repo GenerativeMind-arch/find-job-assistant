@@ -1,5 +1,4 @@
 # 示例: 在项目根目录执行 pytest backend/test/api/test_api.py -sv
-# 注意：需要 Redis 和 MySQL 服务可用，属于集成测试
 """FastAPI API 接口测试。
 
 使用 TestClient 测试各 API 路由的请求/响应结构。
@@ -65,13 +64,28 @@ class TestChatEndpoint:
         response = client.post("/api/chat", json={})
         assert response.status_code == 422
 
-    def test_chat_request_structure(self, client):
-        """验证请求结构被正确接受（可能因 LLM 不可用而 500，但结构不应 422）。"""
-        response = client.post("/api/chat", json={
-            "message": "你好",
-        })
-        # 可能 200 或 500（依赖 LLM），但不应是 422
-        assert response.status_code != 422
+    def test_chat_runs_real_workflow_and_saves_session_snapshot(self, client, monkeypatch):
+        from unittest.mock import AsyncMock
+
+        store = AsyncMock()
+        store.load_state.return_value = None
+        archive = AsyncMock()
+        monkeypatch.setattr("api.chat.get_redis_client", AsyncMock(return_value=object()))
+        monkeypatch.setattr("api.chat.RedisSessionStore", lambda *args: store)
+        monkeypatch.setattr("api.chat.archive_session", archive)
+
+        classify = AsyncMock(side_effect=AssertionError("small talk should skip the LLM"))
+        monkeypatch.setattr("agents.planner._classify_intent_async", classify)
+        response = client.post("/api/chat", json={"session_id": "snapshot", "message": "你好"})
+
+        assert response.status_code == 200
+        assert "你好" in response.json()["reply_message"]
+        classify.assert_not_awaited()
+        snapshot = store.save_state.await_args.args[0]
+        assert snapshot["session_id"] == "snapshot"
+        assert "notice" not in snapshot
+        assert "workflow_trace" not in snapshot
+        archive.assert_awaited_once()
 
 
 class TestResumeEndpoints:

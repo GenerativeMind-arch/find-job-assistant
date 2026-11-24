@@ -230,31 +230,46 @@ try {
     });
 } catch(e) {}
 
-// ── bossApply: 原生点击"立即沟通" + 逐字输入招呼语 ──
-// Python 通过 page.evaluate("window.__bossApply(greeting)") 调用此函数
-// 返回 {success, message, ...}，跟 apply_to_job 的 Python 返回值结构一致
-window.__bossApply = async function(greeting) {
-    const _log = (msg) => console.log('[bossApply] ' + msg);
+// 注意：不要在这里再加"原生派发点击会话卡片"的 helper。
+// 实测（2026-10-10，真实 BOSS 聊天页）：
+//   - locator.click()      → 卡在 "performing click action" 直到超时
+//   - 原生派发 MouseEvent  → 返回成功但 BOSS 的 React 处理器毫无反应，会话根本不打开
+//   - page.mouse.click(x,y)→ 有效（真实鼠标输入）
+// 见 BossAutomation._click_by_coordinates。
+
+// ── bossStartChat: 原生点击"立即沟通" ──
+// Python 通过 page.evaluate("async () => window.__bossStartChat()") 调用。
+// 返回 {success, clicked, message, ...}；clicked 表示按钮是否真的点下去了 ——
+// 这是"这次投递到底有没有发生"的唯一可信信号（平台会自己发出它的招呼语）。
+//
+// 刻意只负责"点"，不负责"发我们自己的话术"：早先的实现会死等聊天弹窗再逐字输入
+// （10s 超时），而实测该弹窗根本不会在当前页面出现，那段代码从未生效过、只白拖慢
+// 每次投递。自有话术改由 Python 侧在聊天页发送（_open_conversation_for_job）。
+window.__bossStartChat = async function() {
+    const _log = (msg) => console.log('[bossStartChat] ' + msg);
     const _sleep = (ms) => new Promise(r => setTimeout(r, Math.round(ms)));
 
     _log('========== 开始原生投递流程 ==========');
-    _log('招呼语: ' + (greeting || '').substring(0, 60) + '...');
 
     // ── 0. 检查页面状态 ──
     const body = (document.body || {}).innerText || '';
     _log('页面body长度: ' + body.length);
 
-    if (body.includes('已沟通') || body.includes('继续沟通')) {
+    // 已投递的判据只看按钮文本：实测详情页上「已沟通」从不出现，而「继续沟通」
+    // 的最小容器就是 .btn-startchat 本身。扫整页 body 会被别处的文字蒙到。
+    const _appliedBtn = document.querySelector('.btn-startchat, .btn-startchat-wrap');
+    const _appliedText = _appliedBtn ? (_appliedBtn.innerText || '').trim() : '';
+    if (_appliedText.includes('继续沟通') || _appliedText.includes('已沟通')) {
         _log('✓ 检测到已投递过，跳过');
-        return {success: true, message: '已投递过', already_applied: true};
+        return {success: true, message: '已投递过', already_applied: true, clicked: false};
     }
     if (body.includes('已达上限') || body.includes('沟通人数已用完') || body.includes('今日次数已用完') || body.includes('今日沟通次数已用完')) {
         _log('✗ 检测到今日沟通次数已用完');
-        return {success: false, message: 'BOSS直聘今日沟通次数已用完', cooldown: true};
+        return {success: false, message: 'BOSS直聘今日沟通次数已用完', cooldown: true, reason: 'daily_quota', clicked: false};
     }
     if (body.includes('操作太频繁') || body.includes('稍后再试') || body.includes('访问过于频繁')) {
         _log('✗ 检测到操作频率限制');
-        return {success: false, message: '操作频率限制', cooldown: true};
+        return {success: false, message: '操作频率限制', cooldown: true, reason: 'rate_limit', clicked: false};
     }
 
     // ── 1. 查找"立即沟通"按钮 ──
@@ -292,7 +307,8 @@ window.__bossApply = async function(greeting) {
     }
     if (!btn) {
         _log('✗ 未找到"立即沟通"按钮');
-        return {success: false, message: '未找到投递按钮'};
+        // clicked=false：连按钮都没点上，调用方绝不能记成"已投递"
+        return {success: false, message: '未找到投递按钮', clicked: false};
     }
     _log('  按钮元素: <' + btn.tagName + '> ' + (btn.className || '') + ' visible=' + (btn.offsetParent !== null));
 
@@ -314,131 +330,19 @@ window.__bossApply = async function(greeting) {
     });
     _log('  点击事件已触发 (clientX=' + Math.round(cx) + ' clientY=' + Math.round(cy) + ')');
 
-    // ── 3. 等待聊天弹窗 ──
-    _log('步骤3: 等待聊天弹窗...');
-    let chatInput = null;
-    for (let attempt = 0; attempt < 40; attempt++) {
-        await _sleep(250);
-        // BOSS聊天输入框是 contenteditable div
-        const inputs = document.querySelectorAll('[contenteditable="true"]');
-        for (const inp of inputs) {
-            if (inp.offsetParent !== null) {
-                chatInput = inp;
-                break;
-            }
-        }
-        if (chatInput) {
-            _log('  聊天弹窗已出现 (第' + (attempt + 1) + '次检测, ' + ((attempt + 1) * 250) + 'ms)');
-            break;
-        }
-        // 检查是否跳转到聊天页了
-        if (window.location.href.includes('/chat')) {
-            _log('  页面已跳转到聊天页');
-            break;
-        }
-        // 检查限制
-        const b = (document.body || {}).innerText || '';
-        if (b.includes('已达上限') || b.includes('今日次数已用完')) {
-            _log('✗ 等待期间检测到已达上限');
-            return {success: false, message: 'BOSS直聘今日沟通次数已用完', cooldown: true};
-        }
+    // ── 3. 点击后的确认（不再等待聊天弹窗）──
+    // 早先这里死等 [contenteditable] 出现（10s），实测该弹窗不会在当前页面出现，
+    // 于是每次都白等 10 秒再去走盲发兜底 —— 那段逻辑已整体移除。
+    // 这里只确认点击没被"今日上限"之类的系统提示挡回来。
+    await _sleep(800 + Math.random() * 700);
+    const afterBody = (document.body || {}).innerText || '';
+    if (afterBody.includes('已达上限') || afterBody.includes('今日次数已用完') || afterBody.includes('沟通人数已用完')) {
+        _log('✗ 点击后检测到已达上限');
+        return {success: false, message: 'BOSS直聘今日沟通次数已用完', cooldown: true, reason: 'daily_quota', clicked: false};
     }
-    if (!chatInput) {
-        // 再次尝试，可能在聊天页
-        await _sleep(2000);
-        const inputs = document.querySelectorAll('[contenteditable="true"]');
-        for (const inp of inputs) {
-            if (inp.offsetParent !== null) { chatInput = inp; break; }
-        }
-    }
-    if (!chatInput) {
-        _log('✗ 聊天弹窗超时(10s)，未找到输入框');
-        // 不直接返回失败，由Python侧兜底（导航到聊天页发）
-        return {success: false, message: '聊天框未出现(10s超时)', fallback_chat_page: true};
-    }
-    _log('  输入框就绪');
 
-    // ── 4. 逐字输入招呼语 ──
-    _log('步骤4: 逐字输入招呼语(' + greeting.length + '个字符)...');
-    chatInput.focus();
-    await _sleep(100 + Math.random() * 200);
-    chatInput.click();
-    await _sleep(200 + Math.random() * 300);
-
-    const startTime = Date.now();
-    for (let i = 0; i < greeting.length; i++) {
-        const ch = greeting[i];
-        // contenteditable div: 直接用textContent追加，然后触发input事件
-        chatInput.textContent += ch;
-        chatInput.dispatchEvent(new InputEvent('input', {
-            bubbles: true, cancelable: true,
-            data: ch, inputType: 'insertText'
-        }));
-        // 随机延迟 60~180ms/字（中速打字）
-        const delay = 60 + Math.random() * 120;
-        await _sleep(delay);
-
-        // 每20字打一个小日志
-        if ((i + 1) % 20 === 0) {
-            const elapsed = Date.now() - startTime;
-            _log('  已输入' + (i + 1) + '/' + greeting.length + '字 (' + Math.round(elapsed / 1000) + 's)');
-        }
-    }
-    const typeTime = Date.now() - startTime;
-    _log('  输入完成, 耗时' + Math.round(typeTime / 1000) + 's, 均速' + Math.round(greeting.length / (typeTime / 1000)) + '字/秒');
-
-    // ── 5. 发送 ──
-    _log('步骤5: 查找发送按钮并发送...');
-    await _sleep(300 + Math.random() * 500);
-    const sendSelectors = [
-        'button[type="send"]',
-        '.btn-send',
-        'button:has-text("发送")',
-        '[class*="send"]',
-        'span:has-text("发送")',
-    ];
-    let sendBtn = null;
-    // has-text不是原生CSS，用文本遍历
-    const btns = document.querySelectorAll('button, span.btn, div[class*="btn"], a[class*="btn"]');
-    for (const b of btns) {
-        const t = (b.innerText || '').trim();
-        if ((t === '发送' || t === '发 送' || t.includes('发送')) && b.offsetParent !== null) {
-            sendBtn = b;
-            break;
-        }
-    }
-    if (!sendBtn) {
-        // BOSS新版可能用SVG图标按钮，尝试查找chat-input附近的按钮
-        const chatArea = chatInput.closest('[class*="chat"]') || chatInput.closest('[class*="dialog"]') || chatInput.parentElement;
-        if (chatArea) {
-            const nearbyBtns = chatArea.querySelectorAll('button');
-            for (const b of nearbyBtns) {
-                if (b.offsetParent !== null && (b.innerText || '').trim().length <= 3) {
-                    sendBtn = b;
-                    _log('  通过附近按钮找到发送: ' + (b.innerText || '(图标)'));
-                    break;
-                }
-            }
-        }
-    }
-    if (!sendBtn) {
-        _log('✗ 未找到发送按钮');
-        return {success: false, message: '招呼语已输入但未找到发送按钮'};
-    }
-    _log('  发送按钮: <' + sendBtn.tagName + '> ' + (sendBtn.className || ''));
-
-    await _sleep(200 + Math.random() * 300);
-    sendBtn.click();
-    _log('  发送按钮已点击');
-
-    // ── 6. 确认发送成功 ──
-    await _sleep(500);
-    const finalBody = (document.body || {}).innerText || '';
-    if (finalBody.includes('发送成功') || finalBody.includes('消息已发送')) {
-        _log('✓ BOSS确认发送成功');
-    }
-    _log('========== 原生投递流程完成 ==========');
-    return {success: true, message: '投递成功'};
+    _log('========== 投递流程完成（已点击「立即沟通」）==========');
+    return {success: true, message: '已点击「立即沟通」', clicked: true};
 };
 """
 
@@ -621,10 +525,33 @@ def parse_skills(text):
 
 
 class BossScraper:
+    # BOSS 列表接口一页固定 15 条（pageSize 传大写也没用），所以「要多少个岗位」
+    # 只能靠翻页解决。封顶 6 页=90 条，避免一次搜索把浏览器线程占太久。
+    SEARCH_PAGE_SIZE = 15
+    SEARCH_MAX_PAGES = 6
+    # 翻页间隔（秒）。实测 3s 可连拉 3 页不死，应用侧另有投递/聊天操作，取保守值。
+    SEARCH_PAGE_GAP_SEC = (3.5, 7.0)
+    # 单页失败后的重试次数与退避区间。code=37（"您的环境存在异常"）实测是**概率性**
+    # 的，重试常能拿到；实测未注入 ANTI_DETECT 时第 1 页就 37，注入后 3 页全通。
+    SEARCH_RETRY_MAX = 2
+    SEARCH_RETRY_BACKOFF_SEC = (8.0, 15.0)
+    # 详情补抓的总时间预算：一页 15 条顺序抓，正常几百毫秒一条，
+    # 一旦被风控拖慢会变成每条 20s → 整轮搜索卡死。超预算的岗位先留空，由
+    # 「AI 分析 / 导入岗位」时按需补抓（fetch_job_description）。
+    DETAIL_FETCH_BUDGET_SEC = 45.0
+
     def __init__(self, headless=False):
         self.headless = headless
         self._pw = self._br = self._ctx = None
         self.page = None
+        # 最近一次 search() 的元信息，供 API 层回传给前端做提示
+        self.last_search_meta: dict = {}
+        # 最近一次列表接口失败原因（code != 0 / 超时 / 异常），用于诊断"0 结果"
+        self._last_xhr_error: str = ""
+        # 最近一次搜索的接口元信息（实际成功页数 / 匹配总数 / 是否还有下一页）
+        self._last_pages_fetched: int = 0
+        self._last_res_count = None
+        self._last_has_more = None
 
     def start(self):
         self._pw = sync_playwright().start()
@@ -634,6 +561,12 @@ class BossScraper:
             "viewport": {"width": 1280, "height": 800},
             "locale": "zh-CN",
             "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+            # 强制直连：Firefox 默认 network.proxy.type=5（跟随系统代理），而本机系统代理
+            # 指向 127.0.0.1:7897(Vortex)，代理一抖动 Boss 页面就报 PR_CONNECT_ABORTED_ERROR。
+            # BOSS 是境内站，直连更快更稳，也少一个被风控针对的特征。
+            # 注意：Firefox 不支持 Chromium 那种 proxy={"server":"direct://"}（会报
+            # NS_ERROR_UNKNOWN_PROXY_HOST），必须用 Firefox 原生偏好 network.proxy.type=0。
+            "firefox_user_prefs": {"network.proxy.type": 0},
         }
         self._ctx = self._pw.firefox.launch_persistent_context(str(PROFILE_DIR), **kw)
         self._br = None
@@ -825,7 +758,8 @@ class BossScraper:
 
     # ── 搜索列表页 ──
 
-    def search(self, keyword, city_code="100010000", districts=None, district="", company_size=None, areas=None):
+    def search(self, keyword, city_code="100010000", districts=None, district="", company_size=None, areas=None,
+               experience=None, salary=None, degree=None, job_type=None, limit=None):
         """搜索关键词，返回岗位列表。
 
         参数：
@@ -847,6 +781,10 @@ class BossScraper:
           city=101280100
           multiBusinessDistrict=440118&multiBusinessDistrict=440113 (可重复, 多区用 & 重复参数)
           scale=302,301,303,304,305,306 (多值逗号分隔)
+
+          limit: 期望的岗位数量上限。BOSS 列表接口一页固定 15 条，
+            这里换算成页数逐页拉取（封顶 SEARCH_MAX_PAGES 页）。
+            传 None/0 时只拉第 1 页（兼容旧行为）。
         """
         scale_name_to_code = {
             "0-20人": "301",
@@ -905,9 +843,36 @@ class BossScraper:
                 if code and code not in district_codes:
                     district_codes.append(code)
 
+        # 经验/薪资/学历/职位类型：把中文标签解析为 BOSS 编码（以线上条件接口为准）
+        filter_codes: dict = {}
+        try:
+            from boss_filters import resolve_filters
+
+            filter_codes = resolve_filters(
+                {"experience": experience, "salary": salary, "degree": degree, "jobType": job_type}
+            )
+            if filter_codes:
+                print(f"  [筛选] 已应用: {filter_codes}")
+        except Exception as exc:
+            print(f"  [筛选] 条件解析失败，本次不做这些筛选: {exc}")
+
+        # 「要几个岗位」→ 第 1 页之外的岗位必须显式翻页才能拿到。
+        # 旧实现写死 max_pages=1，所以无论前端要 60 个还是 200 个，最多只有 15 条。
+        try:
+            _want = int(limit or 0)
+        except (TypeError, ValueError):
+            _want = 0
+        if _want > 0:
+            max_pages = max(1, min(self.SEARCH_MAX_PAGES, -(-_want // self.SEARCH_PAGE_SIZE)))
+        else:
+            max_pages = 1
+        print(f"  [搜索] limit={_want or '未指定'} → 拉取 {max_pages} 页（每页 {self.SEARCH_PAGE_SIZE} 条）")
+
         params = [f"query={quote_plus(keyword)}", f"city={city_code}"]
         if scale_codes:
             params.append(f"scale={','.join(scale_codes)}")
+        for key, val in filter_codes.items():
+            params.append(f"{key}={quote_plus(val)}")
         for dc in district_codes:
             params.append(f"multiBusinessDistrict={dc}")
 
@@ -948,12 +913,34 @@ class BossScraper:
             raise RuntimeError("登录态已过期，请重新登录。")
 
         pause(3, 5)
-        self._scroll_all()
+        # 先小幅滚动让页面渲染出来即可 —— 结果由列表 XHR 翻页拿，
+        # 没必要滚到底（60 次滚动要几十秒）。真要回退到 DOM 抓取时再滚。
+        self._scroll_all(max_scrolls=4)
 
         # 优先：列表 XHR 拉取 + 详情 XHR 补全（拿 JD/真实 HR 名/可投递权限）
         xhr_jobs = self._fetch_jobs_via_xhr(
-            keyword, city_code, district_codes, scale_codes, max_pages=1, area_names=area_inputs
+            keyword, city_code, district_codes, scale_codes, max_pages=max_pages,
+            area_names=area_inputs, filters=filter_codes,
         )
+
+        # 记录本轮到底走了哪条路，API 层会把它回传给前端 —— 否则"搜到 0 条"
+        # 到底是筛选太窄、还是接口被风控，前端完全看不出来。
+        meta = {
+            "keyword": keyword,
+            "city_code": city_code,
+            "filters": dict(filter_codes or {}),
+            "scale": list(scale_codes or []),
+            "max_pages": max_pages,
+            # 实际成功页数：前端据此如实显示"2/4 页"，而不是永远写着期望页数
+            "pages_fetched": self._last_pages_fetched,
+            # BOSS 自己报的匹配总数与"还有没有下一页"（实测响应里确实有这两个字段）
+            "res_count": self._last_res_count,
+            "has_more": self._last_has_more,
+            "xhr_count": len(xhr_jobs),
+            "xhr_error": self._last_xhr_error,
+        }
+        self.last_search_meta = meta
+
         if xhr_jobs:
             # 收集本次结果中的工作区域到缓存,供 UI 下次使用
             try:
@@ -962,11 +949,17 @@ class BossScraper:
                 collect_areas_from_jobs(city_code, xhr_jobs)
             except Exception:
                 pass
+            meta["source"] = "xhr"
             self._save_state()
             return xhr_jobs
 
+        # 列表接口没给东西，才轮到页面 DOM —— 这时把页面滚到底，让卡片都渲染出来
+        print("  [搜索] 列表接口无结果，回退到页面 DOM 抓取")
+        self._scroll_all()
         dom_jobs = self._extract_job_cards()
         if dom_jobs:
+            print(f"  [搜索] 列表接口无结果，DOM 兜底抓到 {len(dom_jobs)} 条")
+            meta["source"] = "dom"
             self._save_state()
             return dom_jobs
 
@@ -1026,10 +1019,13 @@ class BossScraper:
             for j in jobs:
                 if not j["url"] and j["title"][:12] in lm:
                     j["url"] = lm[j["title"][:12]]
+        # 最后兜底：纯文本行启发式，命中率最低，如实标注来源
+        self.last_search_meta["source"] = "heuristic"
+        print(f"  [搜索] 接口与 DOM 均无结果，文本启发式抓到 {len(jobs)} 条")
         return jobs
 
     def _filter_by_welfare(self, jobs, welfare_keywords):
-        """福利筛选：AND逻辑，所有关键词都必须匹配。"""
+        """福利筛选：OR 逻辑，命中任意一个所选福利即保留（多选更符合直觉）。"""
         if not welfare_keywords:
             return jobs
         filtered = []
@@ -1037,7 +1033,7 @@ class BossScraper:
             tags = " ".join(j.get("welfareList", []) or [])
             if not tags:
                 tags = j.get("description", "") or ""
-            if all(kw in tags for kw in welfare_keywords):
+            if any(kw in tags for kw in welfare_keywords):
                 filtered.append(j)
         return filtered
 
@@ -1264,6 +1260,95 @@ class BossScraper:
 
         return result
 
+    def _post_joblist(
+        self,
+        page_num: int,
+        keyword: str,
+        city_code: str,
+        district_codes: list,
+        area_names: list,
+        scale_codes: list,
+        filters: dict,
+    ) -> dict:
+        """在页面内 POST joblist.json，返回原始响应 dict。
+
+        请求失败一律返回 {"code": -1, "message": ...}，调用方按 code != 0 处理。
+        """
+        import urllib.parse as _urlparse
+
+        form: dict = {
+            "page": str(page_num),
+            "pageSize": str(self.SEARCH_PAGE_SIZE),
+            "city": str(city_code),
+            "query": keyword or "",
+            "expectInfo": "",
+            "multiSubway": "",
+            "position": "",
+            "jobType": "",
+            "salary": "",
+            "experience": "",
+            "degree": "",
+            "industry": "",
+            "stage": "",
+            "scene": "1",
+            "encryptExpectId": "",
+        }
+        if scale_codes:
+            form["scale"] = ",".join(str(s) for s in scale_codes)
+        # 经验/薪资/学历/职位类型编码（来自 boss_filters 解析）
+        for _k in ("experience", "salary", "degree", "jobType"):
+            _v = (filters or {}).get(_k)
+            if _v:
+                form[_k] = str(_v)
+
+        # multiBusinessDistrict 需要在 URL querystring 中重复出现
+        _ts = int(time.time() * 1000)
+        _qs_parts = [f"_={_ts}"]
+        for dc in district_codes or []:
+            _qs_parts.append(f"multiBusinessDistrict={_urlparse.quote(str(dc))}")
+        for an in area_names or []:
+            _qs_parts.append(f"multiAreaDistrict={_urlparse.quote(str(an))}")
+        _post_url = "https://www.zhipin.com/wapi/zpgeek/search/joblist.json?" + "&".join(_qs_parts)
+
+        # 浏览器内 fetch（自动带 cookie/referer，避开直接 requests 被识别）
+        _form_body = "&".join(
+            f"{_urlparse.quote(str(k))}={_urlparse.quote(str(v))}" for k, v in form.items()
+        )
+        _fetch_js = (
+            """async () => {
+            const _c = new AbortController();
+            const _t = setTimeout(() => _c.abort(), 25000);
+            try {
+                const r = await fetch("""
+            + json.dumps(_post_url)
+            + """, {
+                    method: "POST",
+                    headers: {"Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "XMLHttpRequest"},
+                    body: """
+            + json.dumps(_form_body)
+            + """,
+                    credentials: "include",
+                    signal: _c.signal
+                });
+                return await r.json();
+            } catch (e) {
+                // 超时/被中断 → 返回非 0，调用方会重试或回退到 DOM 抓取。
+                // 必须有这个兜底：page.evaluate 自身没有超时，页面内 fetch 一旦
+                // 卡住会永久占住 Playwright 单线程 + 浏览器锁，导致后续所有请求一起卡死。
+                return {code: -1, message: 'fetch异常'};
+            } finally {
+                clearTimeout(_t);
+            }
+        }"""
+        )
+        try:
+            payload = self.page.evaluate(_fetch_js)
+        except Exception as exc:  # noqa: BLE001
+            return {"code": -1, "message": f"page.evaluate 异常: {exc}"}
+        if not isinstance(payload, dict):
+            return {"code": -1, "message": f"返回非 JSON: {type(payload).__name__}"}
+        return payload
+
     def _fetch_jobs_via_xhr(
         self,
         keyword: str,
@@ -1272,6 +1357,7 @@ class BossScraper:
         scale_codes: list,
         max_pages: int = 1,
         area_names: list = None,
+        filters: dict = None,
     ) -> list:
         """通过 BOSS XHR 抓取岗位列表 + 详情。
 
@@ -1285,6 +1371,7 @@ class BossScraper:
             headers = self._extract_zp_headers()
             zp_token = headers.get("zp_token") or ""
             token = headers.get("token") or ""
+            self._last_xhr_error = ""
 
             detail_headers = {
                 "zp_token": zp_token,
@@ -1301,66 +1388,59 @@ class BossScraper:
             }
 
             all_jobs: list = []
+            _detail_deadline = time.time() + self.DETAIL_FETCH_BUDGET_SEC
+            _detail_skipped = 0
+            # 接口回传的元信息（供 search() 写进 meta 给前端）
+            self._last_pages_fetched = 0
+            self._last_res_count = None
+            self._last_has_more = None
             for page_num in range(1, max_pages + 1):
-                form: dict = {
-                    "page": str(page_num),
-                    "pageSize": "15",
-                    "city": str(city_code),
-                    "query": keyword or "",
-                    "expectInfo": "",
-                    "multiSubway": "",
-                    "position": "",
-                    "jobType": "",
-                    "salary": "",
-                    "experience": "",
-                    "degree": "",
-                    "industry": "",
-                    "stage": "",
-                    "scene": "1",
-                    "encryptExpectId": "",
-                }
-                if scale_codes:
-                    form["scale"] = ",".join(str(s) for s in scale_codes)
+                if page_num > 1:
+                    # 翻页间隔。实测（2026-10-10，注入 ANTI_DETECT 的真实环境）3s 间隔
+                    # 可以连续拉到第 3 页都不出 code=37；应用侧还叠加投递/聊天等操作，
+                    # 保守取 3.5~7s。
+                    time.sleep(random.uniform(*self.SEARCH_PAGE_GAP_SEC))
 
-                # multiBusinessDistrict 需要在 URL querystring 中重复出现
-                import urllib.parse as _urlparse
+                payload: dict = {}
+                for attempt in range(self.SEARCH_RETRY_MAX + 1):
+                    if attempt:
+                        backoff = random.uniform(*self.SEARCH_RETRY_BACKOFF_SEC)
+                        print(
+                            f"  [搜索] 第 {page_num} 页失败，{backoff:.0f}s 后重试"
+                            f"（{attempt}/{self.SEARCH_RETRY_MAX}）"
+                        )
+                        time.sleep(backoff)
+                    payload = self._post_joblist(
+                        page_num, keyword, city_code, district_codes, area_names, scale_codes, filters
+                    )
+                    if payload.get("code") == 0:
+                        break
 
-                _ts = int(time.time() * 1000)
-                _qs_parts = [f"_={_ts}"]
-                for dc in district_codes or []:
-                    _qs_parts.append(f"multiBusinessDistrict={_urlparse.quote(str(dc))}")
-                for an in area_names or []:
-                    _qs_parts.append(f"multiAreaDistrict={_urlparse.quote(str(an))}")
-                _post_url = "https://www.zhipin.com/wapi/zpgeek/search/joblist.json?" + "&".join(_qs_parts)
-
-                # 浏览器内 fetch（自动带 cookie/referer，避免风控 code 37）
-                _form_body = "&".join(f"{_urlparse.quote(str(k))}={_urlparse.quote(str(v))}" for k, v in form.items())
-                _fetch_js = (
-                    """async () => {
-                    const r = await fetch("""
-                    + json.dumps(_post_url)
-                    + """, {
-                        method: "POST",
-                        headers: {"Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "XMLHttpRequest"},
-                        body: """
-                    + json.dumps(_form_body)
-                    + """,
-                        credentials: "include"
-                    });
-                    return await r.json();
-                }"""
-                )
-                try:
-                    payload = self.page.evaluate(_fetch_js)
-                except Exception:
-                    return []
-                if not isinstance(payload, dict) or payload.get("code") != 0:
-                    return []
-                job_list = (payload.get("zpData") or {}).get("jobList") or []
-
-                if not job_list:
+                if payload.get("code") != 0:
+                    # 重试完仍失败才放弃。必须 break 而不是 return []：否则前面几页
+                    # 已经拿到的岗位会被一起丢掉。
+                    _code = payload.get("code")
+                    _msg = payload.get("message") or payload.get("msg") or ""
+                    self._last_xhr_error = f"接口 code={_code} {_msg}".strip()
+                    print(f"  [搜索] 第 {page_num} 页最终失败 code={_code} {_msg}")
                     break
 
+                zp = payload.get("zpData") or {}
+                job_list = zp.get("jobList") or []
+                # hasMore / resCount 实测存在（2026-10-10）：resCount=450、hasMore=true
+                if isinstance(zp.get("resCount"), int):
+                    self._last_res_count = zp["resCount"]
+                if isinstance(zp.get("hasMore"), bool):
+                    self._last_has_more = zp["hasMore"]
+                self._last_pages_fetched = page_num
+
+                if not job_list:
+                    print(f"  [搜索] 第 {page_num} 页无数据，停止翻页")
+                    break
+                print(
+                    f"  [搜索] 第 {page_num} 页拿到 {len(job_list)} 条"
+                    f"（resCount={self._last_res_count} hasMore={self._last_has_more}）"
+                )
                 for j in job_list:
                     security_id = j.get("securityId") or ""
                     lid = j.get("lid") or ""
@@ -1398,20 +1478,29 @@ class BossScraper:
                         "legal_rep": "",
                     }
                     # 详情：拿 JD 补充（浏览器内 fetch，避免风控）
-                    if security_id and lid:
+                    # 受 DETAIL_FETCH_BUDGET_SEC 约束：翻到第 N 页时累计可能上百条，
+                    # 若被风控拖成每条 20s，整轮搜索会直接卡到前端超时。
+                    # 超预算的岗位先只留列表字段，JD 由「AI 分析/导入岗位」按需补抓。
+                    if security_id and lid and time.time() >= _detail_deadline:
+                        _detail_skipped += 1
+                    if security_id and lid and time.time() < _detail_deadline:
                         try:
                             _detail_url = f"https://www.zhipin.com/wapi/zpgeek/job/detail.json?securityId={_urlparse.quote(security_id)}&lid={_urlparse.quote(lid)}"
                             p2 = self.page.evaluate(
                                 """async () => {
+                                const _c = new AbortController();
+                                const _t = setTimeout(() => _c.abort(), 8000);
                                 try {
                                     const r = await fetch("""
                                 + json.dumps(_detail_url)
                                 + """, {
                                         headers: {"X-Requested-With": "XMLHttpRequest"},
-                                        credentials: "include"
+                                        credentials: "include",
+                                        signal: _c.signal
                                     });
                                     return await r.json();
                                 } catch(e) { return {}; }
+                                finally { clearTimeout(_t); }
                             }"""
                             )
                         except Exception:
@@ -1423,6 +1512,8 @@ class BossScraper:
                             bc = zd.get("brandComInfo") or {}
                             ok = zd.get("oneKeyResumeInfo") or {}
                             item["description"] = ji.get("postDescription", "") or ""
+                            # 福利标签（本地"福利筛选"的数据源；原先从未赋值 → 福利筛选恒为空）
+                            item["welfareList"] = ji.get("welfareList") or zd.get("welfareList") or []
                             item["hr_name"] = bi.get("name", "") or ""
                             item["hr_title"] = bi.get("title", "") or ""
                             item["hr_active"] = bi.get("activeTimeDesc", "") or ""
@@ -1445,8 +1536,25 @@ class BossScraper:
                             )
                     all_jobs.append(item)
 
+                # BOSS 说没有下一页了就别再请求，省一次可能触发风控的调用。
+                # 但必须**先收下本页**再 break —— 这个判断原先放在上面的 for 循环
+                # 之前，于是 hasMore=false 的那一页整页被丢掉：实测 resCount=27，
+                # 第 1 页 15 条 + 第 2 页 12 条，最后只返回了 15 条。
+                if self._last_has_more is False and page_num < max_pages:
+                    print(f"  [搜索] hasMore=false，停止翻页")
+                    break
+
+            if _detail_skipped:
+                print(
+                    f"  [搜索] 详情补抓跳过 {_detail_skipped} 条"
+                    f"（预算 {self.DETAIL_FETCH_BUDGET_SEC:.0f}s 用尽，JD 留待按需补抓）"
+                )
             return all_jobs
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            # 不能静默吞掉：调用方会据此判断"是不是接口挂了"，
+            # 否则用户只看到"搜到 0 条"却完全不知道原因。
+            self._last_xhr_error = f"{type(exc).__name__}: {exc}"
+            print(f"  [搜索] 列表抓取异常: {type(exc).__name__}: {exc}")
             return []
 
     def _scroll_all(self, max_scrolls: int = 60, stable_rounds: int = 3):

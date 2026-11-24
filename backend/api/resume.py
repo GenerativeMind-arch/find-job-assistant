@@ -6,6 +6,8 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Response
 from pydantic import BaseModel
 
 from storage.redis_client import get_redis_client, RedisSessionStore
+from storage.session_archive import archive_session
+from workflow.graph import run_workflow
 from workflow.state import CopilotState
 from log import get_logger
 
@@ -17,11 +19,9 @@ router = APIRouter(prefix="/api/resume", tags=["resume"])
 @router.get("/content")
 async def get_resume_content(session_id: str):
     """获取当前简历内容 JSON。"""
-    from api.chat import _aload_state
-
     client = await get_redis_client()
     store = RedisSessionStore(session_id, client)
-    saved = await _aload_state(store)
+    saved = await store.load_state()
     if not saved:
         raise HTTPException(status_code=404, detail="会话不存在")
     state = CopilotState.model_validate(saved)
@@ -33,11 +33,9 @@ async def get_resume_content(session_id: str):
 @router.get("/html")
 async def get_resume_html(session_id: str):
     """获取当前简历 HTML。"""
-    from api.chat import _aload_state
-
     client = await get_redis_client()
     store = RedisSessionStore(session_id, client)
-    saved = await _aload_state(store)
+    saved = await store.load_state()
     if not saved:
         raise HTTPException(status_code=404, detail="会话不存在")
     state = CopilotState.model_validate(saved)
@@ -49,11 +47,9 @@ async def get_resume_html(session_id: str):
 @router.get("/preview")
 async def preview_resume_html(session_id: str):
     """直接返回 HTML 用于浏览器预览。"""
-    from api.chat import _aload_state
-
     client = await get_redis_client()
     store = RedisSessionStore(session_id, client)
-    saved = await _aload_state(store)
+    saved = await store.load_state()
     if not saved:
         raise HTTPException(status_code=404, detail="会话不存在")
     state = CopilotState.model_validate(saved)
@@ -70,11 +66,9 @@ class RenderRequest(BaseModel):
 @router.post("/render")
 async def render_resume(req: RenderRequest, background_tasks: BackgroundTasks):
     """渲染指令接口。"""
-    from api.chat import _ainvoke_graph, _aload_state, _asave_state, _get_graph, _persist_to_mysql_safe
-
     client = await get_redis_client()
     store = RedisSessionStore(req.session_id, client)
-    saved = await _aload_state(store)
+    saved = await store.load_state()
     if not saved:
         raise HTTPException(status_code=404, detail="会话不存在")
 
@@ -83,21 +77,15 @@ async def render_resume(req: RenderRequest, background_tasks: BackgroundTasks):
     state.current_intent = "render_edit"
     state.execution_plan = ["render_agent"]
 
-    graph = _get_graph()
     try:
-        result = await _ainvoke_graph(graph, state.model_dump())
+        final = await run_workflow(state)
     except Exception as e:
         logger.error("Render failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"渲染失败: {e}")
 
-    final = CopilotState.model_validate(result)
+    await store.save_state(final.to_session_snapshot())
 
-    persist_data = final.model_dump(exclude={"user_message", "user_attachments", "current_intent",
-                                              "execution_plan", "reply_message", "triggered_agents",
-                                              "workflow_trace"})
-    await _asave_state(store, persist_data)
-
-    background_tasks.add_task(_persist_to_mysql_safe, final)
+    background_tasks.add_task(archive_session, final)
 
     return {
         "render_config": final.render_config.model_dump(),

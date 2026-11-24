@@ -312,11 +312,9 @@ def _export_target(state: CopilotState, target: str, export_format: str) -> tupl
 @router.post("/export")
 async def export_resume(req: ExportRequest):
     """导出简历、岗位解析、缺失信息或面试问答。"""
-    from api.chat import _aload_state
-
     client = await get_redis_client()
     store = RedisSessionStore(req.session_id, client)
-    saved = await _aload_state(store)
+    saved = await store.load_state()
     if not saved:
         raise HTTPException(status_code=404, detail="会话不存在")
 

@@ -5,11 +5,12 @@ server:
 
 llm:
   provider: "deepseek"
-  model: "deepseek-chat"
+  model: "deepseek-flash"
   api_base: "https://api.deepseek.com"
   api_key_env: "DEEPSEEK_API_KEY"
   temperature: 0.3
   max_tokens: 8192
+  timeout: 120                   # 秒；防止单次调用无上限挂死（缺省=SDK 默认）
 
 embedding:
   provider: "dashscope"

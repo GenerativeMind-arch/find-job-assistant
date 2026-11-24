@@ -359,15 +359,19 @@ class AgentLoop:
 
     def _build_extra_context(self) -> str:
         try:
-            from boss.boss_state import get_setting, get_today_application_count
+            from boss.boss_state import get_apply_allowance, get_setting
             parts = []
             resume = get_setting("resume_summary", "")
             if resume and len(resume) > 5:
                 parts.append(f"- resume: {resume[:300]}")
             parts.append(f"- city: {get_setting('default_city', 'national')}")
-            limit = get_setting("daily_apply_limit", "15")
-            today = get_today_application_count()
-            parts.append(f"- today: {today}/{limit}")
+            # 给规划器的是**今日剩余额度**（自适应预算算出来的），而不是设置页那个固定值 ——
+            # 否则它可能规划出一堆注定被额度拦掉的投递步骤
+            allowance = get_apply_allowance()
+            parts.append(
+                f"- today: {allowance['applied']}/{allowance['budget']}"
+                f" (remaining {allowance['remaining']})"
+            )
             return "\n".join(parts) if parts else "none"
         except Exception:
             return "none"

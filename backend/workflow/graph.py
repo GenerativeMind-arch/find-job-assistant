@@ -9,6 +9,7 @@ Plan Mode 演进方向（feature flag）：
 
 from __future__ import annotations
 
+from functools import cache
 from typing import Any
 
 from langgraph.graph import StateGraph, END
@@ -194,3 +195,16 @@ def compile_graph():
     """编译并返回可执行图。"""
     g = build_graph()
     return g.compile()
+
+
+@cache
+def _compiled_workflow():
+    return compile_graph()
+
+
+async def run_workflow(
+    state: CopilotState, *, config: dict[str, Any] | None = None,
+) -> CopilotState:
+    """Run one turn through the shared workflow."""
+    result = await _compiled_workflow().ainvoke(state.model_dump(), config=config)
+    return CopilotState.model_validate(result)

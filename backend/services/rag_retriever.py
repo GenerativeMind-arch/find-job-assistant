@@ -26,10 +26,16 @@ def _get_chroma_client():
         return _chroma_client
     try:
         import chromadb
+        from chromadb.config import Settings
         from config_loader import resolve_data_path
         kb_config = get_knowledge_base_config()
         persist_dir = resolve_data_path(kb_config.get("chroma_persist_dir", "data/chroma_db"))
-        _chroma_client = chromadb.PersistentClient(path=persist_dir)
+        # 关闭匿名遥测：ChromaDB 默认用 PostHog 上报使用数据，国内连不上会不断
+        # ConnectionResetError + backoff 重试刷屏（日志里那条 "Backing off send_request"）
+        _chroma_client = chromadb.PersistentClient(
+            path=persist_dir,
+            settings=Settings(anonymized_telemetry=False),
+        )
         logger.info("ChromaDB client initialized at %s", persist_dir)
     except Exception as exc:
         logger.error("ChromaDB client initialization failed: %s", exc)
@@ -84,14 +90,15 @@ class RAGRetriever:
         if top_n is None:
             top_n = int(kb_config.get("rerank_top_n", 5))
 
-        # 1. Query Embedding
-        query_vector = await RAGRetriever._embed_query(query)
-
-        # 2. ChromaDB 向量检索
+        # 1. ChromaDB Collection — 空库直接短路
+        # 放在 Embedding 之前：否则空知识库也要白付一次 DashScope Embedding + Rerank 网络调用
         collection = _get_collection(collection_name)
         if collection.count() == 0:
             logger.info("Knowledge base is empty, no results for query: %s", query[:50])
             return []
+
+        # 2. Query Embedding
+        query_vector = await RAGRetriever._embed_query(query)
 
         search_kwargs = {
             "query_embeddings": [query_vector],

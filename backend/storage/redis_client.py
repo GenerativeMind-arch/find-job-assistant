@@ -34,6 +34,14 @@ async def get_redis_client() -> aioredis.Redis:
     return _redis_client
 
 
+async def close_redis_client() -> None:
+    """Close the process-local client and its connections."""
+    global _redis_client
+    client, _redis_client = _redis_client, None
+    if client is not None:
+        await client.aclose()
+
+
 class RedisSessionStore:
     """会话级 Redis 异步状态管理。"""
 

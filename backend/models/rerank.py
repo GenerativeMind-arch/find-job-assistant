@@ -101,22 +101,32 @@ def _normalize_provider(provider: str) -> str:
     return (provider or "dashscope").strip().lower()
 
 
+_reranker_instance: Any | None = None
+
+
 def get_reranker() -> Any:
-    """根据 rerank.provider 返回对应 reranker 对象。"""
+    """根据 rerank.provider 返回对应 reranker 对象（进程内缓存复用）。"""
+    global _reranker_instance
+    if _reranker_instance is not None:
+        return _reranker_instance
+
     cfg = get_rerank_config()
     provider = _normalize_provider(cfg.get("provider", "dashscope"))
 
     if provider in {"dashscope", "tongyi"}:
         # gte-rerank-v2 使用独立端点，langchain 旧适配器不兼容，用自研适配器
-        return _DashScopeRerankV2(cfg["model"], cfg.get("api_key", ""))
+        _reranker_instance = _DashScopeRerankV2(cfg["model"], cfg.get("api_key", ""))
+        return _reranker_instance
 
     if provider in {"cohere"}:
         if not cfg.get("api_key"):
             raise ValueError("rerank.provider=cohere requires api_key_env in config.")
-        return _CohereRerankerAdapter(cfg["model"], cfg["api_key"], int(cfg.get("top_n", 5)))
+        _reranker_instance = _CohereRerankerAdapter(cfg["model"], cfg["api_key"], int(cfg.get("top_n", 5)))
+        return _reranker_instance
 
     if provider in {"huggingface", "hf", "sentence_transformers", "local"}:
-        return _HuggingFaceCrossEncoderReranker(cfg["model"])
+        _reranker_instance = _HuggingFaceCrossEncoderReranker(cfg["model"])
+        return _reranker_instance
 
     raise ValueError(
         "Unsupported rerank.provider='{}'. Supported providers: dashscope, cohere, huggingface".format(

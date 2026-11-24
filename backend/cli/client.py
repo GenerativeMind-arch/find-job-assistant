@@ -53,11 +53,18 @@ def heartbeat():
 
 
 def monitor_pause():
-    return _post("/api/boss/monitor/pause")
+    """停止自动回复。
+
+    走 /api/boss/auto-reply（写持久化开关），与前端那颗「停止回复」按钮同一入口。
+    不要改用 /api/boss/monitor/pause —— 那只翻运行期"浏览器忙"标记，
+    监控循环根本不看它，调用后回复照发（"设了停止却没停"）。
+    """
+    return _post("/api/boss/auto-reply", {"enabled": False})
 
 
 def monitor_resume():
-    return _post("/api/boss/monitor/resume")
+    """恢复自动回复（写持久化开关，并立即触发一轮扫描）。"""
+    return _post("/api/boss/auto-reply", {"enabled": True})
 
 
 # ── 搜索 & 投递 ──

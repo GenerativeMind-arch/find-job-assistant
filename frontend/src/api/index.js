@@ -105,9 +105,19 @@ export function bossResumeMonitor() {
   return bossApi.post('/monitor/resume')
 }
 
-/** POST /api/boss/jobs/search */
-export function bossSearchJobs(keyword, city = '', welfare = '', limit = 60) {
-  return bossApi.post('/jobs/search', { keyword, city, welfare, limit })
+/** POST /api/boss/jobs/search — filters: {experience, salary, degree, job_type}（数组或字符串） */
+export function bossSearchJobs(keyword, city = '', welfare = '', limit = 60, filters = {}) {
+  return bossApi.post('/jobs/search', { keyword, city, welfare, limit, ...filters })
+}
+
+/** POST /api/boss/auto-reply — 自动回复总开关 { enabled: boolean } */
+export function bossSetAutoReply(enabled) {
+  return bossApi.post('/auto-reply', { enabled })
+}
+
+/** GET /api/boss/filters — 返回 BOSS 支持的筛选项标签 */
+export function bossFilters() {
+  return bossApi.get('/filters')
 }
 
 /** GET /api/boss/jobs */
@@ -120,9 +130,10 @@ export function bossApply(jobUrl, greeting = '') {
   return bossApi.post('/jobs/apply', { job_url: jobUrl, greeting })
 }
 
-/** POST /api/boss/jobs/apply-batch */
-export function bossApplyBatch(jobUrls, greeting = '') {
-  return bossApi.post('/jobs/apply-batch', { job_urls: jobUrls, greeting })
+/** POST /api/boss/jobs/apply-batch
+ *  批量投递含 45-120s 的人工间隔，调用方可传 config（如 { timeout: 0 }）覆盖默认超时。 */
+export function bossApplyBatch(jobUrls, greeting = '', config = {}) {
+  return bossApi.post('/jobs/apply-batch', { job_urls: jobUrls, greeting }, config)
 }
 
 /** POST /api/boss/jobs/scan-and-apply */

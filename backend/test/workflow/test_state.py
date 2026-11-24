@@ -12,6 +12,32 @@ from workflow.state import (
 
 class TestCopilotStateDefaults:
 
+    def test_snapshot_preserves_session_data_without_turn_data(self):
+        state = CopilotState(
+            session_id="snapshot",
+            job=Job(id="jd", title="开发工程师"),
+            user_message="this turn",
+            user_attachments=[{"filename": "example.txt"}],
+            current_intent="render_edit",
+            execution_plan=["render_agent"],
+            notice="current notice",
+            reply_message="current reply",
+            triggered_agents=["render_agent"],
+            active_plan_id="plan-1",
+            plan_result={"steps": []},
+        )
+        snapshot = state.to_session_snapshot()
+        assert not {
+            "user_message", "user_attachments", "current_intent", "execution_plan",
+            "notice", "reply_message", "triggered_agents", "workflow_trace",
+            "active_plan_id", "plan_result",
+        }.intersection(snapshot)
+        restored = CopilotState.model_validate(snapshot)
+        assert restored.session_id == state.session_id
+        assert restored.job == state.job
+        assert restored.render_config == state.render_config
+        assert state.user_message == "this turn"
+
     def test_default_state(self):
         state = CopilotState()
         assert state.session_id == ""

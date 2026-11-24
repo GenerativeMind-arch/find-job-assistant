@@ -1,68 +1,87 @@
 <template>
   <div class="app-layout">
-    <!-- Mobile Tab Bar -->
-    <div class="mobile-tabs" role="tablist" aria-label="面板切换">
-      <button
-        type="button"
-        class="mobile-tab"
-        :class="{ active: activePanel === 'chat' }"
-        :aria-selected="activePanel === 'chat'"
-        @click="activePanel = 'chat'"
+    <header class="workspace-header">
+      <div class="workspace-brand">
+        <span class="workspace-mark" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="7" width="16" height="13" rx="3"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M4 12a20 20 0 0 0 16 0M12 12v3"/></svg>
+        </span>
+        <h1>求职助手</h1>
+      </div>
+      <nav class="mobile-tabs" aria-label="面板切换">
+        <button
+          type="button"
+          class="mobile-tab"
+          :class="{ active: activePanel === 'chat' }"
+          :aria-pressed="activePanel === 'chat'"
+          @click="activePanel = 'chat'"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          对话
+        </button>
+        <button
+          type="button"
+          class="mobile-tab"
+          :class="{ active: activePanel === 'result' }"
+          :aria-pressed="activePanel === 'result'"
+          @click="activePanel = 'result'"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          工作区
+        </button>
+      </nav>
+    </header>
+
+    <main class="workspace-body" ref="workspaceRef" :style="{ '--chat-width': chatWidth + '%' }">
+      <!-- Left Panel: Chat -->
+      <div
+        class="layout-pane chat-pane"
+        :class="{ 'is-hidden-mobile': activePanel !== 'chat' }"
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-        对话
-      </button>
-      <button
-        type="button"
-        class="mobile-tab"
-        :class="{ active: activePanel === 'result' }"
-        :aria-selected="activePanel === 'result'"
-        @click="activePanel = 'result'"
+        <ChatPanel
+          :messages="messages"
+          :loading="loading"
+          :notice="notice"
+          @send="handleSend"
+          @upload="handleUpload"
+          @open-boss="openBoss"
+        />
+      </div>
+
+      <div
+        class="divider-handle"
+        role="separator"
+        aria-label="调整对话面板宽度"
+        aria-orientation="vertical"
+        :aria-valuenow="chatWidth"
+        aria-valuemin="30"
+        aria-valuemax="68"
+        tabindex="0"
+        @mousedown.prevent="startResize"
+        @keydown.left.prevent="resizeTo(chatWidth - 3)"
+        @keydown.right.prevent="resizeTo(chatWidth + 3)"
+      ></div>
+
+      <!-- Right Panel: Results -->
+      <div
+        class="layout-pane result-pane"
+        :class="{ 'is-hidden-mobile': activePanel !== 'result' }"
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-        结果
-      </button>
-    </div>
-
-    <!-- Divider Handle (Desktop) -->
-    <div class="divider-handle" ref="dividerRef" @mousedown="startResize">
-      <div class="divider-line"></div>
-    </div>
-
-    <!-- Left Panel: Chat -->
-    <div
-      class="layout-pane chat-pane"
-      :class="{ 'is-hidden-mobile': activePanel !== 'chat' }"
-      :style="{ width: chatWidth }"
-    >
-      <ChatPanel
-        :messages="messages"
-        :loading="loading"
-        @send="handleSend"
-        @upload="handleUpload"
-      />
-    </div>
-
-    <!-- Right Panel: Results -->
-    <div
-      class="layout-pane result-pane"
-      :class="{ 'is-hidden-mobile': activePanel !== 'result' }"
-    >
-      <ResultPanel
-        ref="resultPanelRef"
-        :session-id="sessionId"
-        :job="job"
-        :gaps="gaps"
-        :questions="questionsToAsk"
-        :resume-html="resumeHtml"
-        :resume-content="resumeContentJson"
-        :render-config="renderConfig"
-        :interview-qa="interviewQa"
-        :triggered-agents="triggeredAgents"
-        @imported="handleBossImported"
-        @resume-rendered="handleResumeRendered"
-      />
-    </div>
+        <ResultPanel
+          ref="resultPanelRef"
+          :session-id="sessionId"
+          :job="job"
+          :gaps="gaps"
+          :questions="questionsToAsk"
+          :resume-html="resumeHtml"
+          :resume-content="resumeContentJson"
+          :render-config="renderConfig"
+          :interview-qa="interviewQa"
+          :triggered-agents="triggeredAgents"
+          @imported="handleBossImported"
+          @resume-rendered="handleResumeRendered"
+        />
+      </div>
+    </main>
   </div>
 </template>
 
@@ -76,23 +95,28 @@ const sessionId = ref('')
 const loading = ref(false)
 const activePanel = ref('chat')
 const messages = ref([])
-const dividerRef = ref(null)
+const workspaceRef = ref(null)
 const resultPanelRef = ref(null)
+const notice = ref('')
 
 // Resizable panels
-const chatWidth = ref('50%')
+const chatWidth = ref(43)
 const isResizing = ref(false)
 
-function startResize(e) {
+function startResize() {
   isResizing.value = true
   document.body.style.cursor = 'col-resize'
   document.body.style.userSelect = 'none'
 }
 
+function resizeTo(width) {
+  chatWidth.value = Math.round(Math.max(30, Math.min(68, width)))
+}
+
 function onMouseMove(e) {
   if (!isResizing.value) return
-  const pct = (e.clientX / window.innerWidth) * 100
-  chatWidth.value = Math.max(30, Math.min(70, pct)) + '%'
+  const bounds = workspaceRef.value.getBoundingClientRect()
+  resizeTo((e.clientX - bounds.left) / bounds.width * 100)
 }
 
 function onMouseUp() {
@@ -108,6 +132,7 @@ onMounted(() => {
   document.addEventListener('mouseup', onMouseUp)
 })
 onUnmounted(() => {
+  onMouseUp()
   document.removeEventListener('mousemove', onMouseMove)
   document.removeEventListener('mouseup', onMouseUp)
 })
@@ -134,6 +159,7 @@ function addMessage(role, content, attachments = []) {
 
 async function handleSend(text) {
   if (!text.trim()) return
+  notice.value = ''
   addMessage('user', text)
   loading.value = true
 
@@ -150,6 +176,7 @@ async function handleSend(text) {
 }
 
 async function handleUpload({ text, attachments }) {
+  notice.value = ''
   addMessage('user', text || '（上传附件）', attachments.map(a => a.filename))
   loading.value = true
 
@@ -173,6 +200,7 @@ async function handleUpload({ text, attachments }) {
 
 function applyResponse(data) {
   sessionId.value = data.session_id
+  notice.value = data.notice || ''
   if (data.job) job.value = data.job
   if (data.gaps) gaps.value = data.gaps
   if (data.questions_to_ask) questionsToAsk.value = data.questions_to_ask
@@ -189,6 +217,11 @@ function applyResponse(data) {
       resultPanelRef.value?.setTab('interview')
     })
   }
+}
+
+function openBoss() {
+  activePanel.value = 'result'
+  resultPanelRef.value?.setTab('boss')
 }
 
 /** 简历渲染调整后更新 resume_html / render_config */
@@ -211,127 +244,101 @@ function handleBossImported({ sessionId: bossSessionId, job: bossJob, message })
 <style scoped>
 .app-layout {
   display: flex;
-  width: 100%;
+  flex-direction: column;
   height: 100dvh;
-  overflow: hidden;
   background: var(--bg);
-  position: relative;
 }
-
-/* ── Desktop Divider Handle ── */
-.divider-handle {
-  position: absolute;
-  left: 50%;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-  z-index: 10;
-  cursor: col-resize;
+.workspace-header {
+  min-height: 64px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  transform: translateX(-50%);
-  transition: background var(--transition);
+  justify-content: space-between;
+  padding: 8px clamp(12px, 2.5vw, 32px);
+  background: var(--bg-white);
+  border-bottom: 1px solid var(--border);
 }
-.divider-handle:hover,
-.divider-handle:active {
-  background: rgba(37, 99, 235, 0.08);
+.workspace-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
-.divider-line {
-  width: 2px;
-  height: 40px;
-  border-radius: 2px;
-  background: var(--border-strong);
-  transition: background var(--transition), height var(--transition);
+.workspace-brand h1 {
+  font-size: 17px;
+  font-weight: 680;
+  white-space: nowrap;
 }
-.divider-handle:hover .divider-line {
+.workspace-mark {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   background: var(--primary);
-  height: 60px;
+  color: white;
 }
-
-/* ── Mobile Tabs ── */
-.mobile-tabs {
-  display: none;
+.workspace-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, var(--chat-width)) 12px minmax(0, 1fr);
+  padding: 12px clamp(12px, 2.5vw, 32px) 16px;
 }
-
-/* ── Panels ── */
 .layout-pane {
-  min-width: 0;
-  height: 100%;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
-  animation: fadeIn 0.3s ease;
-}
-
-.chat-pane {
-  flex-shrink: 0;
-  border-right: 1px solid var(--border);
-  z-index: 1;
-}
-
-.result-pane {
-  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   background: var(--bg-white);
-  min-width: 300px;
 }
+.divider-handle {
+  display: grid;
+  place-items: center;
+  cursor: col-resize;
+}
+.divider-handle::before {
+  content: '';
+  width: 3px;
+  height: 28px;
+  border-radius: var(--radius-full);
+  background: var(--border-strong);
+}
+.divider-handle:is(:hover, :focus-visible)::before { background: var(--primary); }
+.mobile-tabs { display: none; }
 
-/* ── Mobile Breakpoint ── */
 @media (max-width: 900px) {
-  .divider-handle {
-    display: none;
-  }
-
-  .app-layout {
-    flex-direction: column;
-  }
-
+  .workspace-header { min-height: 58px; gap: 8px; }
+  .workspace-brand { gap: 8px; }
+  .workspace-brand h1 { font-size: 15px; }
+  .workspace-mark { width: 32px; height: 32px; }
+  .workspace-body { display: flex; padding: 8px 8px env(safe-area-inset-bottom, 0px); }
+  .layout-pane { width: 100%; }
+  .divider-handle, .layout-pane.is-hidden-mobile { display: none; }
   .mobile-tabs {
     display: flex;
     gap: 4px;
-    flex-shrink: 0;
-    margin: 10px 12px;
     padding: 3px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-full);
-    background: rgba(255, 255, 255, 0.95);
-    box-shadow: var(--shadow);
-    backdrop-filter: blur(12px);
+    border-radius: 10px;
+    background: var(--surface-dark);
   }
-
   .mobile-tab {
-    flex: 1;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 5px;
-    min-width: 0;
-    padding: 8px 12px;
-    border-radius: var(--radius-full);
+    padding: 0 10px;
+    min-height: 44px;
+    border-radius: var(--radius-sm);
     color: var(--text-secondary);
-    font-size: 13px;
-    font-weight: 500;
-    transition: all var(--transition);
+    white-space: nowrap;
   }
   .mobile-tab.active {
-    background: var(--primary);
-    color: #fff;
-    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
-  }
-
-  .layout-pane {
-    flex: 1 1 auto;
-    width: 100% !important;
-    height: auto;
-    min-height: 0;
-  }
-
-  .chat-pane {
-    border-right: 0;
-  }
-
-  .layout-pane.is-hidden-mobile {
-    display: none;
+    color: var(--primary-hover);
+    background: var(--bg-white);
+    font-weight: 650;
+    box-shadow: var(--shadow);
   }
 }
 </style>

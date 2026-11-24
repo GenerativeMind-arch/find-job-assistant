@@ -188,3 +188,102 @@ class TestBossManagerLockBrowser:
             assert mgr.monitor_paused is True
 
         asyncio.run(_test())
+
+
+class TestAutoReplyDurability:
+    """「停止回复」必须持久 —— 只有持久化开关能控制回复。
+
+    背景：按钮过去同时写持久化的 auto_reply_enabled 和内存的 monitor_paused，
+    而循环里 monitor_paused 的闸门在心跳之前，导致后端重启后行为不一致。
+    现在 auto_reply_enabled 是唯一真值来源，monitor_paused 只表示"浏览器忙"。
+
+    注意：这些测试一律 monkeypatch 掉 set_setting，避免污染开发者本机的
+    真实 auto_reply_enabled 配置。
+    """
+
+    def test_disable_writes_persisted_setting_only(self, monkeypatch):
+        """点停止回复只写持久化设置，不得把浏览器标记为忙。"""
+        import boss_state
+
+        written = {}
+        monkeypatch.setattr(boss_state, "set_setting", lambda k, v: written.__setitem__(k, v))
+
+        BossManager._instance = None
+        mgr = BossManager.get_instance()
+        mgr.monitor_paused = False
+
+        asyncio.run(mgr.set_auto_reply_enabled(False))
+
+        assert written == {"auto_reply_enabled": "false"}
+        assert mgr.monitor_paused is False, "停止回复不应顺带把浏览器标记为忙"
+
+    def test_disable_keeps_monitor_task_alive(self, monkeypatch):
+        """停止回复不取消监控任务 —— 心跳仍需继续跑。"""
+        import boss_state
+
+        monkeypatch.setattr(boss_state, "set_setting", lambda k, v: None)
+
+        BossManager._instance = None
+        mgr = BossManager.get_instance()
+
+        async def _test():
+            mgr.monitor_task = asyncio.create_task(asyncio.sleep(30))
+            await mgr.set_auto_reply_enabled(False)
+            assert mgr.monitor_task is not None
+            assert not mgr.monitor_task.done()
+            mgr.monitor_task.cancel()
+
+        asyncio.run(_test())
+
+    def test_enable_resets_scan_deadline_and_wakes_loop(self, monkeypatch):
+        """恢复回复要立即扫一轮：重置扫描到期时刻 + 唤醒等待中的循环。"""
+        import boss_state
+
+        monkeypatch.setattr(boss_state, "set_setting", lambda k, v: None)
+
+        BossManager._instance = None
+        mgr = BossManager.get_instance()
+        mgr.automation = None  # 避免走到 create_task 分支
+        mgr._next_scan_at = 12345.0
+        mgr._monitor_wake.clear()
+
+        asyncio.run(mgr.set_auto_reply_enabled(True))
+
+        assert mgr._next_scan_at == 0.0, "恢复回复必须重置扫描到期时刻"
+        assert mgr._monitor_wake.is_set(), "恢复回复必须唤醒等待中的循环"
+
+    def test_monitor_state_off_when_switch_disabled(self):
+        """UI 状态跟随持久化开关，与 monitor_paused 无关。"""
+        from types import SimpleNamespace
+
+        BossManager._instance = None
+        mgr = BossManager.get_instance()
+        mgr.automation = SimpleNamespace(page=object())
+
+        async def _test():
+            mgr.monitor_task = asyncio.create_task(asyncio.sleep(30))
+            assert mgr._monitor_state(False) == "off"
+            # 即使把 monitor_paused 设成 True，开着开关仍是 running
+            mgr.monitor_paused = True
+            assert mgr._monitor_state(True) == "running"
+            mgr.monitor_task.cancel()
+
+        asyncio.run(_test())
+
+    def test_monitor_state_off_when_loop_dead(self):
+        """循环因登录过期退出后，不该还显示"运行中"。"""
+        from types import SimpleNamespace
+
+        BossManager._instance = None
+        mgr = BossManager.get_instance()
+        mgr.automation = SimpleNamespace(page=object())
+        mgr.monitor_task = None
+
+        assert mgr._monitor_state(True) == "off"
+
+    def test_monitor_state_no_browser(self):
+        BossManager._instance = None
+        mgr = BossManager.get_instance()
+        mgr.automation = None
+
+        assert mgr._monitor_state(True) == "no_browser"

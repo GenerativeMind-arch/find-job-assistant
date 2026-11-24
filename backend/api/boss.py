@@ -19,14 +19,23 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+from log import get_logger
+
+logger = get_logger("boss")
 
 # ── 确保 boss 模块在 sys.path ──
 _BOSS_DIR = Path(__file__).resolve().parent.parent / "boss"
 if str(_BOSS_DIR) not in sys.path:
     sys.path.insert(0, str(_BOSS_DIR))
 
-from boss.manager import BossManager
+from boss.manager import (
+    LOCK_WAIT_TIMEOUT_SEC,
+    BossManager,
+    BrowserBusyError,
+    summarize_apply_results,
+)
 from boss_state import (
     add_application,
     get_application,
@@ -35,11 +44,13 @@ from boss_state import (
     list_applications,
     update_application_status,
     get_today_application_count,
+    get_apply_allowance,
     get_or_create_conversation,
     get_conversation,
     list_active_conversations,
     add_message,
     get_messages,
+    get_message,
     replace_conversation_messages,
     update_conversation_last_message,
     update_conversation_status,
@@ -64,6 +75,19 @@ from boss_replier import generate_greeting, generate_greeting_ai
 from boss_company import build_company_preview, rank_companies_by_position_count
 
 router = APIRouter(prefix="/api/boss", tags=["BOSS直聘自动化"])
+
+
+async def browser_wedged_handler(request, exc):  # noqa: ANN001
+    """浏览器线程卡死 → 503 + 一句能直接显示给用户的处置办法。
+
+    定义在这里（而不是直接写在 main.py 的装饰器里）是为了能被测试注册：
+    main.py 用 `app.add_exception_handler(BrowserWedgedError, browser_wedged_handler)`
+    挂上它。没有这个 handler，异常会被 FastAPI 兜成 500 "Internal Server Error"，
+    真正的提示（"请点停止浏览器再重新启动"）就丢了，用户只看到一句无用的 500。
+    """
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 # ── 初始化数据库 ──
 try:
@@ -166,6 +190,26 @@ class SearchRequest(BaseModel):
     areas: Optional[List[str]] = None
     company_size: Optional[List[str]] = None
     company_size_str: Optional[str] = None
+    # 新增筛选：值可传中文标签（如"3-5年"/"本科"，后端解析为 BOSS 编码）
+    experience: Optional[List[str]] = None
+    salary: Optional[List[str]] = None
+    degree: Optional[List[str]] = None
+    job_type: Optional[List[str]] = None
+
+    @field_validator(
+        "districts", "areas", "company_size", "experience", "salary", "degree", "job_type",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_scalar_to_list(cls, v):
+        """允许这些字段传单个字符串（如 experience="3-5年"）。
+
+        多选语义天然是列表，但调用方（CLI/脚本）很容易顺手传标量；
+        这里统一归一为列表，避免"字符串 → 422"这类调用方踩坑。
+        """
+        if isinstance(v, str):
+            return [item.strip() for item in v.split(",") if item.strip()]
+        return v
 
 class ApplyRequest(BaseModel):
     job_url: str
@@ -193,11 +237,28 @@ class SettingsUpdate(BaseModel):
     greeting_enabled: Optional[str] = None
     greeting_mode: Optional[str] = None
     smart_greeting_prompt: Optional[str] = None
+    # 自有定制话术（第二条消息）
+    custom_greeting_enabled: Optional[str] = None
+    custom_greeting_delay_min_sec: Optional[str] = None
+    custom_greeting_delay_max_sec: Optional[str] = None
+    custom_greeting_max_len: Optional[str] = None
+    # 本地相关性重排/过滤
+    relevance_rank_enabled: Optional[str] = None
+    relevance_filter_enabled: Optional[str] = None
+    relevance_min_score: Optional[str] = None
+    relevance_llm_enabled: Optional[str] = None
     ai_reply_style: Optional[str] = None
+    # 动态模式下 daily_apply_limit 是**起步额度**，会一路涨到 apply_daily_max；
+    # 关掉 apply_dynamic_enabled 才退回旧的固定行为。
     daily_apply_limit: Optional[str] = None
+    apply_dynamic_enabled: Optional[str] = None
+    apply_daily_max: Optional[str] = None
     auto_reply_enabled: Optional[str] = None
+    # 已废弃：监控循环改为双节拍后不再读取，保留仅为兼容旧客户端
     min_reply_delay_sec: Optional[str] = None
     max_reply_delay_sec: Optional[str] = None
+    scan_interval_sec: Optional[str] = None       # 未读扫描周期（秒），默认 3600
+    heartbeat_interval_sec: Optional[str] = None  # 心跳/保活周期（秒），默认 120
     batch_delay_min_sec: Optional[str] = None
     batch_delay_max_sec: Optional[str] = None
     resume_summary: Optional[str] = None
@@ -336,13 +397,38 @@ async def boss_navigate_chat():
 # ══════════════════════════════════════
 
 @router.post("/monitor/pause")
-def boss_monitor_pause():
+async def boss_monitor_pause():
+    """⚠️ 遗留端点：只标记"浏览器正忙"，**不会停止自动回复**。
+
+    想真正停回复请用 POST /api/boss/auto-reply {"enabled": false}。
+    保留它只是为了兼容旧客户端，新代码不要再接。
+    """
     return _get_manager().pause_monitor()
 
 
 @router.post("/monitor/resume")
-def boss_monitor_resume():
+async def boss_monitor_resume():
+    """⚠️ 遗留端点：只清除"浏览器忙"标记，不会恢复已停止的自动回复。见 /auto-reply。
+
+    必须是 async：resume_monitor 会唤醒监控循环用的 asyncio.Event，
+    而 Event.set() 只能在事件循环线程里调（sync 端点会被 FastAPI 丢进线程池）。
+    """
     return _get_manager().resume_monitor()
+
+
+class AutoReplyRequest(BaseModel):
+    enabled: bool
+
+
+@router.post("/auto-reply")
+async def boss_set_auto_reply(req: AutoReplyRequest):
+    """自动回复总开关：写持久化设置 + 同步运行期监控状态。
+
+    前端那颗「恢复回复 / 停止回复」按钮走这里。之前按钮只调 /monitor/pause|resume
+    （仅翻运行期 monitor_paused），而监控循环真正判断的是 auto_reply_enabled
+    设置项 —— 开关是关的时候点「恢复回复」看起来毫无反应。
+    """
+    return await _get_manager().set_auto_reply_enabled(req.enabled)
 
 
 # ══════════════════════════════════════
@@ -362,7 +448,11 @@ async def boss_search_jobs(req: SearchRequest):
         raise HTTPException(status_code=503, detail="浏览器未启动，请先点击「启动浏览器」")
 
     async with manager.lock_browser():
-        city_code = CITY_MAP.get(req.city or get_setting("default_city", "全国"), "100010000")
+        # 城市留空 = **真的全国**。原先这里 fallback 到 default_city，而库里那个值
+        # 是 "淄博"（上游项目留下的默认值），前端却把空选项标成「全国」——
+        # 界面写全国、实际在淄博里搜，结果自然和手机端完全对不上（实测搜 "ai"
+        # 全国上万条，淄博只有 27 条）。空就是空，不要再静默换成某个城市。
+        city_code = CITY_MAP.get(req.city or "", "100010000")
         try:
             cs_list: list = []
             if req.company_size:
@@ -386,13 +476,66 @@ async def boss_search_jobs(req: SearchRequest):
                 ds_list or None, "",
                 cs_list if cs_list else None,
                 ar_list if ar_list else None,
+                req.experience, req.salary, req.degree, req.job_type,
+                req.limit,
             )
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"搜索失败: {e}")
+            # 必须记日志：这里只抛 HTTPException，不落日志的话真正原因（如 Playwright
+            # 超时）就彻底丢了，前端只看到一句 "搜索失败: timeout"
+            logger.error("Boss search failed: %s", e, exc_info=True)
+            raise HTTPException(status_code=500, detail=f"搜索失败: {type(e).__name__}: {e}")
 
         if req.welfare:
             welfare_kw = [w.strip() for w in req.welfare.split(",") if w.strip()]
             jobs = manager.automation._filter_by_welfare(jobs, welfare_kw)
+
+        # 本地相关性重排。BOSS 的搜索是服务端分词宽泛匹配（搜 "AI开发" 会混进
+        # 只在 JD 里提过 AI 的岗位），而搜索页没有排序控件、服务端也没有可用的排序
+        # 参数 —— 只能在本地做。默认只重排不隐藏（见 boss_relevance 模块说明）。
+        relevance_stats = None
+        if get_setting("relevance_rank_enabled", "true") == "true":
+            try:
+                from boss_relevance import rank_jobs
+
+                min_score = None
+                if get_setting("relevance_filter_enabled", "false") == "true":
+                    min_score = float(get_setting("relevance_min_score", "3") or 0)
+                jobs, relevance_stats = rank_jobs(jobs, req.keyword, min_score=min_score)
+                print(
+                    f"  [相关性] tokens={relevance_stats.get('tokens')} "
+                    f"保留={len(jobs)} 丢弃={relevance_stats.get('dropped')} "
+                    f"标题命中={relevance_stats.get('title_matched')}"
+                )
+            except Exception as e:
+                # 重排失败不能影响搜索本身，退回 BOSS 原始顺序
+                logger.warning("relevance ranking failed: %s", e)
+
+        # LLM 复核：上面的 token 命中只能证明"字面上出现过"，判断不了语义等价
+        # （搜"Agent开发"时标题写着"大模型应用工程师"的岗位字面不命中却完全相关），
+        # 也挡不住"JD 里恰好提过这个词"的无关岗位。整批交给 LLM 复核一遍，
+        # 只删**明显不相关**的。失败/解析不出来时一条都不删（宁可放过）。
+        llm_dropped: list = []
+        if jobs and (req.keyword or "").strip() and get_setting("relevance_llm_enabled", "true") == "true":
+            try:
+                from boss_relevance import (
+                    LLM_FILTER_MAX_ITEMS,
+                    build_llm_filter_prompt,
+                    drop_by_llm,
+                    parse_llm_filter_result,
+                )
+                from models.llm import acall_llm
+
+                system, user = build_llm_filter_prompt(req.keyword, jobs)
+                reviewed = min(len(jobs), LLM_FILTER_MAX_ITEMS)
+                raw = await acall_llm(system, user)
+                drops = parse_llm_filter_result(raw, reviewed)
+                if drops:
+                    jobs, llm_dropped = drop_by_llm(jobs, drops)
+                print(f"  [相关性-LLM] 复核={reviewed} 删除={len(llm_dropped)}")
+            except Exception as e:
+                # 复核失败只是退回"不删"，不能影响搜索本身
+                logger.warning("LLM relevance filter failed: %s", e)
+                llm_dropped = []
 
         saved_ids = []
         result_jobs = []
@@ -414,7 +557,68 @@ async def boss_search_jobs(req: SearchRequest):
             else:
                 result_jobs.append(_search_job_payload(j))
 
-        return {"jobs_found": len(jobs), "saved": len(saved_ids), "jobs": result_jobs}
+        # 已投递/已沟通的不再出现在搜索结果里（否则每次搜索都是同一批老岗位）。
+        # 记录仍留在 applications 表（会话/统计页照常可见），只是这里不返回。
+        _contacted = {"greeting_sent", "applied", "replied"}
+        hidden = [j for j in result_jobs if j.get("status") in _contacted]
+        if hidden:
+            result_jobs = [j for j in result_jobs if j.get("status") not in _contacted]
+
+        meta = dict(getattr(manager.automation, "last_search_meta", {}) or {})
+        if relevance_stats or llm_dropped:
+            rel_meta = {
+                k: (relevance_stats or {}).get(k)
+                for k in ("tokens", "dropped", "title_matched", "min_score")
+            }
+            # 删了哪些、为什么 —— 过滤必须可解释，用户才能判断是否误删
+            rel_meta["llm_dropped"] = len(llm_dropped)
+            rel_meta["llm_dropped_jobs"] = llm_dropped[:10]
+            meta["relevance"] = rel_meta
+        if hidden:
+            meta["hidden_contacted"] = len(hidden)
+        return {
+            "jobs_found": len(result_jobs),
+            "jobs_hidden": len(hidden),
+            "saved": len(saved_ids),
+            "jobs": result_jobs,
+            "search_meta": meta,
+            "hint": _search_hint(meta, len(result_jobs)),
+        }
+
+
+def _search_hint(meta: dict, found: int) -> str:
+    """「搜到 0 条」到底为什么 —— 给前端一句能直接显示的话。"""
+    if found:
+        return ""
+    if meta.get("hidden_contacted"):
+        return (
+            f"本轮 BOSS 返回的 {meta['hidden_contacted']} 条岗位都已投递/已沟通，已从列表隐藏。"
+            "换关键词、城市或筛选条件才能看到新岗位。"
+        )
+    err = meta.get("xhr_error") or ""
+    if err:
+        return f"BOSS 列表接口被拒绝（{err}）。通常是触发风控或登录态过期，请重新登录后再试。"
+    if meta.get("source") == "heuristic":
+        return "接口和页面结构都没解析出岗位，BOSS 可能改版了页面，请把后端控制台日志发给开发者。"
+    return (
+        "该筛选组合下 BOSS 没有返回岗位。经验/薪资/学历/公司规模叠加后范围会非常窄，"
+        "试着放宽其中一两项，或换更大的城市。"
+    )
+
+
+@router.get("/filters")
+async def boss_get_filters():
+    """返回可用的筛选项标签（经验/薪资/学历/规模/融资/职位类型 + 常见福利标签）。
+
+    数据来自 BOSS 公开条件接口（免登录），服务端直连并缓存——不依赖浏览器，
+    因此未启动浏览器时前端下拉也能正常显示。
+    """
+    try:
+        from boss_filters import list_options
+
+        return await asyncio.to_thread(list_options)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取筛选项失败: {e}")
 
 
 @router.get("/jobs/{job_id}")
@@ -438,12 +642,14 @@ async def boss_apply(req: ApplyRequest):
         raise HTTPException(status_code=503, detail="浏览器未启动")
 
     async with manager.lock_browser():
-        daily_limit = int(get_setting("daily_apply_limit", "15"))
-        if get_today_application_count() >= daily_limit:
-            raise HTTPException(status_code=429, detail="已达到今日投递上限")
+        allowance = get_apply_allowance()
+        if allowance["remaining"] <= 0:
+            raise HTTPException(status_code=429, detail=allowance["reason"] or "已达到今日投递额度")
 
         greeting = req.greeting
-        if not greeting:
+        # 只有「追加自有定制话术」开着时才需要生成。关着的话这条话术根本不会发出去
+        # （平台自己那条已由「立即沟通」发出），白调一次 LLM。
+        if not greeting and get_setting("custom_greeting_enabled", "false") == "true":
             job = get_application_by_url(req.job_url)
             title = job["job_title"] if job else "相关岗位"
             company = job["company"] if job else "贵公司"
@@ -472,8 +678,7 @@ async def boss_apply(req: ApplyRequest):
                 generate_greeting_ai, title, company, "", job_desc, is_boss, style, resume, opt_hints
             )
 
-        result = await manager.run_pw(manager.automation.apply_to_job, req.job_url, greeting)
-        return result
+        return await manager.apply_job_async(req.job_url, greeting)
 
 
 @router.post("/jobs/apply-batch")
@@ -483,11 +688,12 @@ async def boss_apply_batch(req: ApplyBatchRequest):
         raise HTTPException(status_code=503, detail="浏览器未启动")
 
     async with manager.lock_browser():
-        daily_limit = int(get_setting("daily_apply_limit", "15"))
-        remaining = daily_limit - get_today_application_count()
-        urls = req.job_urls[: max(1, remaining)]
-        results = await manager.run_pw(manager.automation.apply_batch, urls, req.greeting)
-        return {"results": results}
+        allowance = get_apply_allowance()
+        if allowance["remaining"] <= 0:
+            raise HTTPException(status_code=429, detail=allowance["reason"] or "已达到今日投递额度")
+        urls = req.job_urls[: allowance["remaining"]]
+        results = await manager.apply_batch_async(urls, req.greeting)
+        return {"results": results, "summary": summarize_apply_results(results, len(req.job_urls))}
 
 
 @router.post("/jobs/scan")
@@ -527,16 +733,47 @@ async def boss_scan_current_page():
 
 @router.post("/jobs/scan-and-apply")
 async def boss_scan_and_apply(req: ScanAndApplyRequest = ScanAndApplyRequest()):
+    """一键投递：把**岗位库里 status=pending 的岗位**批量投出去。
+
+    早先实现是 `automation.scan_and_apply_current_page` —— 扫描**浏览器当前页**的
+    DOM 取岗位。但 `apply_to_job` 会 goto 到岗位详情页且不返回，所以投过任意一个
+    岗位之后「当前页」就不再是搜索结果页，扫描恒为 0（浏览器刚启动、停在首页时同理）。
+    现在改为从岗位库取待投递岗位，与浏览器停在哪一页无关 —— 与前端「一键投递」
+    （直接调 /jobs/apply-batch）同语义，CLI 的 `scan-apply` 也因此能用了。
+    """
     manager = _get_manager()
     if not manager.automation:
         raise HTTPException(status_code=503, detail="浏览器未启动")
 
     async with manager.lock_browser():
-        daily_limit = int(get_setting("daily_apply_limit", "15"))
-        if get_today_application_count() >= daily_limit:
-            raise HTTPException(status_code=429, detail="已达到今日投递上限")
-        result = await manager.run_pw(manager.automation.scan_and_apply_current_page, req.greeting)
-        return result
+        allowance = get_apply_allowance()
+        remaining = allowance["remaining"]
+        if remaining <= 0:
+            raise HTTPException(status_code=429, detail=allowance["reason"] or "已达到今日投递额度")
+
+        # 库里按 updated_at DESC 排 → 取到的就是最近一次搜索的那批
+        pending = list_applications(status="pending", limit=200)
+        urls = [j["job_url"] for j in pending if j.get("job_url")][:remaining]
+        if not urls:
+            return {
+                "success": False,
+                "message": "岗位库里没有待投递的岗位（先搜索一次，或列表里的岗位都已在沟通中）",
+                "scanned": 0,
+                "applied": 0,
+                "results": [],
+            }
+
+        results = await manager.apply_batch_async(urls, req.greeting)
+        summary = summarize_apply_results(results, len(urls))
+        success_count = summary["applied"]
+        return {
+            "success": success_count > 0,
+            "message": f"待投递 {len(urls)} 个，成功 {success_count} 个",
+            "scanned": len(urls),
+            "applied": success_count,
+            "results": results,
+            "summary": summary,
+        }
 
 
 # ══════════════════════════════════════
@@ -554,6 +791,36 @@ async def boss_analyze_jd(req: AnalyzeRequest):
     desc = req.description or ""
     title = req.job_title or ""
     company = req.company or ""
+
+    # 搜索列表页只返回公司/薪资，JD 正文在详情页 → 缺失时按需补抓并回写数据库
+    if len(desc.strip()) < 20 and req.job_url:
+        manager = _get_manager()
+        if manager.automation and manager.automation.page is not None:
+            try:
+                async with manager.lock_browser():
+                    fetched = await manager.run_pw(
+                        manager.automation.fetch_job_description, req.job_url
+                    )
+                if fetched and len(fetched.strip()) > len(desc.strip()):
+                    desc = fetched
+                    _rec = get_application_by_url(_normalize_job_url(req.job_url))
+                    if _rec:
+                        update_application_from_job(_rec["id"], {"description": desc})
+            except Exception as e:
+                print(f"  [JD] 按需补抓失败: {e}")
+
+    # 补抓后仍没有 JD → 明确告知，而不是把空 JD 丢给 LLM 换回一段含糊回复
+    if len(desc.strip()) < 20:
+        return {
+            "match_score": 0,
+            "decision": "无法分析",
+            "key_skills": [], "reasons": [], "risks": [], "suggested_questions": [],
+            "gap": "", "advice": "",
+            "summary": (
+                "没有拿到这个岗位的 JD 正文（搜索列表页只返回公司/薪资）。"
+                "请先启动 BOSS 浏览器，我会自动打开详情页抓取 JD；或手动粘贴 JD 再分析。"
+            ),
+        }
 
     if resume and len(resume.strip()) > 5:
         prompt = f"""你是求职辅导专家。分析以下岗位JD，对比求职者简历，输出JSON。
@@ -648,24 +915,50 @@ async def boss_send_message(conv_id: int, req: SendMessageRequest):
     if not hr_name:
         raise HTTPException(status_code=400, detail="会话缺少HR姓名")
 
-    async with manager.lock_browser():
-        try:
-            opened = await asyncio.wait_for(
-                manager.run_pw(manager.automation.open_conversation_by_name, hr_name),
-                timeout=10,
-            )
-            if not opened:
-                raise HTTPException(status_code=500, detail=f"无法打开 {hr_name} 的会话")
-            await manager.run_pw(manager.automation.send_message, req.content)
-            add_message(conv_id, "me", req.content, ai_generated=False)
-            update_conversation_last_message(conv_id, req.content, "me")
-            return {"status": "ok", "message": "发送成功"}
-        except asyncio.TimeoutError:
-            raise HTTPException(status_code=504, detail="操作超时")
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"发送失败: {e}")
+    try:
+        # 限时等锁：后台扫描整轮持锁（开会话 + LLM + 拟人停顿，动辄几分钟），
+        # 不设上限的话这里会无声地卡住，前端只有一个转不完的"发送中..."。
+        # 超时回 409 让用户稍后重试，比挂着强。
+        async with manager.lock_browser(timeout=LOCK_WAIT_TIMEOUT_SEC):
+            try:
+                opened = await asyncio.wait_for(
+                    manager.run_pw(manager.automation.open_conversation_by_name, hr_name),
+                    timeout=10,
+                )
+                if not opened:
+                    raise HTTPException(status_code=500, detail=f"无法打开 {hr_name} 的会话")
+                confirmed = await manager.run_pw(manager.automation.send_message, req.content)
+                if not confirmed:
+                    # send_message 的判断依据是"消息区里出现了这段文字"，页面重渲染慢
+                    # 或选择器失配时会误报失败 —— 此时消息很可能其实已经发出去了。
+                    # 所以两种极端都不对：报错会让用户重发、可能发成两条；静默成功
+                    # 又让用户以为发过了。如实说"没确认上，自己去核对"。
+                    #
+                    # 不落库：本地一旦记下这条，会话会被标成 has_unreplied=0，自动回复
+                    # 就认为 HR 的消息已经回过了，而这条错账**不会自愈**。反过来漏记
+                    # 一条真发出去的消息是能自愈的 —— 下一轮扫描的
+                    # replace_conversation_messages 会按 DOM 整段重写消息历史。
+                    return {
+                        "status": "ok",
+                        "message": "发送未确认",
+                        "warning": "未能确认消息已发出，请到浏览器里核对",
+                    }
+                msg_id = add_message(conv_id, "me", req.content, ai_generated=False)
+                update_conversation_last_message(conv_id, req.content, "me")
+                # 回带刚落库的那一行（含真实 id/created_at）：前端据它本地追加，
+                # 省掉一次"整段重新拉取"。让前端自己拼时间戳的话，显示的时间会和库里对不上。
+                return {"status": "ok", "message": "发送成功", "sent_message": get_message(msg_id)}
+            except asyncio.TimeoutError:
+                raise HTTPException(status_code=504, detail="操作超时")
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"发送失败: {e}")
+    except BrowserBusyError:
+        raise HTTPException(
+            status_code=409,
+            detail="后台正在扫描会话，浏览器暂时被占用，请稍后重试",
+        )
 
 
 @router.post("/conversations/{conv_id}/pause")
@@ -706,15 +999,51 @@ def boss_get_settings():
     return {"settings": settings}
 
 
+# 数值型设置项。它们的读取端一律是裸的 int()/float()（daily_apply_limit 甚至
+# 没有 `or 默认值` 兜底），写进空串或非数字会让 /api/boss/status 之类的接口
+# 直接 500。所以在这里挡住，把问题当场告诉调用方，而不是留给下一次轮询去炸。
+_NUMERIC_SETTINGS = frozenset({
+    "daily_apply_limit",
+    "apply_daily_max",
+    "scan_interval_sec",
+    "heartbeat_interval_sec",
+    "custom_greeting_delay_min_sec",
+    "custom_greeting_delay_max_sec",
+    "custom_greeting_max_len",
+    "min_reply_delay_sec",
+    "max_reply_delay_sec",
+    "batch_delay_min_sec",
+    "batch_delay_max_sec",
+    "batch_rest_every",
+})
+
+
 @router.put("/settings")
 async def boss_update_settings(req: SettingsUpdate):
     _key_alias = {"greeting_enabled": "ai_greeting_enabled"}
     updates = {}
+    # 只跳过「没传」（None）的字段。空串是合法值 —— 以前把 "" 也当成"没传"，
+    # 于是清空简历摘要、清空微信号这类操作会被静默丢弃，用户以为改了却没生效。
+    # 前端现在只提交真正改动过的字段，不会再把未触碰的字段当成空串发过来。
     for k, v in req.model_dump().items():
         actual_key = _key_alias.get(k, k)
-        if v is not None and v != "":
+        if v is None:
+            continue
+        if actual_key in _NUMERIC_SETTINGS:
+            try:
+                float(v)
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{actual_key} 需要是数字，收到 {v!r}（空值会写坏读取端，已拒绝）",
+                )
+        if actual_key == "auto_reply_enabled":
+            # 走 set_auto_reply_enabled：它会一并唤醒监控循环、重置扫描到期时刻，
+            # 与 Boss 页那颗「停止/恢复回复」按钮行为完全一致。
+            await _get_manager().set_auto_reply_enabled(str(v) == "true")
+        else:
             set_setting(actual_key, str(v))
-            updates[actual_key] = str(v)
+        updates[actual_key] = str(v)
     return {"status": "ok", "updated": updates}
 
 
@@ -861,6 +1190,21 @@ async def boss_import_job(req: ImportJobRequest):
     if not record:
         raise HTTPException(status_code=404, detail="岗位不存在，请先在 Boss 面板搜索")
 
+    # 1.5 JD 补抓：列表页只有公司/薪资，缺 JD 正文则按需从详情页补抓并回写
+    if not (record.get("description") or "").strip() and record.get("job_url"):
+        manager = _get_manager()
+        if manager.automation and manager.automation.page is not None:
+            try:
+                async with manager.lock_browser():
+                    fetched = await manager.run_pw(
+                        manager.automation.fetch_job_description, record["job_url"]
+                    )
+                if fetched and fetched.strip():
+                    update_application_from_job(record["id"], {"description": fetched})
+                    record = get_application(record["id"]) or record
+            except Exception as e:
+                print(f"  [JD] 导入前补抓失败: {e}")
+
     # 2. 转换为 CopilotState.Job（标记为已解析）
     job = Job(**_convert_boss_job_to_copilot_job(record))
 
@@ -875,11 +1219,7 @@ async def boss_import_job(req: ImportJobRequest):
     else:
         state = CopilotState(session_id=session_id, job=job)
 
-    persist_data = state.model_dump(exclude={
-        "user_message", "user_attachments", "current_intent",
-        "execution_plan", "reply_message", "triggered_agents", "workflow_trace",
-    })
-    await store.save_state(persist_data)
+    await store.save_state(state.to_session_snapshot())
 
     return {
         "session_id": session_id,
@@ -887,3 +1227,28 @@ async def boss_import_job(req: ImportJobRequest):
         "status": "imported",
         "message": f"已导入岗位「{job.title}」到工作流会话 {session_id}。请在对话区输入「分析这个岗位」开始分析。",
     }
+
+
+# ══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
+#  风控冷却解除（运维）
+# ══════════════════════════════════════════════════════════════
+
+
+@router.post("/cooldown/clear")
+async def boss_clear_cooldown():
+    """清掉内存里的风控冷却计时，让投递立即恢复。
+
+    为什么保留这个口子：`banned` 档冷却 3600s 起，而安全检查是"在页面开头扫关键词"
+    的启发式 —— 一旦误判，用户就得白等一小时（或重启后端）才能继续。实测记录：
+    BOSS 详情页常驻的免责声明含"违规"，曾让每次投递都被判成封号。
+
+    也可以在界面上看到「风控冷却中」时调用它，而不是去改代码或重启。
+    """
+    manager = _get_manager()
+    if not manager.automation:
+        raise HTTPException(status_code=503, detail="浏览器未启动")
+    before = manager.automation._cooldown_remaining()
+    manager.automation._cooldown_until = 0.0
+    manager.automation._risk_strikes = 0
+    return {"status": "ok", "cleared_seconds": round(before, 1)}

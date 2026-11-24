@@ -1,17 +1,18 @@
 <template>
   <div class="result-panel">
-    <div class="tab-bar">
+    <nav ref="tabBar" class="tab-bar" aria-label="求职工作区">
       <button
         v-for="tab in tabs"
         :key="tab.key"
         :class="['tab-btn', { active: activeTab === tab.key }]"
+        :aria-pressed="activeTab === tab.key"
         @click="activeTab = tab.key"
       >
-        <span v-if="tab.icon" class="tab-icon" v-html="tab.icon"></span>
+        <span v-if="tab.icon" aria-hidden="true" class="tab-icon" v-html="tab.icon"></span>
         <span>{{ tab.label }}</span>
         <span v-if="tab.badge" class="tab-badge">{{ tab.badge }}</span>
       </button>
-    </div>
+    </nav>
 
     <div class="tab-content">
       <transition name="tab-fade" mode="out-in">
@@ -28,7 +29,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import ProjectIntro from './tabs/ProjectIntro.vue'
 import JobAnalysis from './tabs/JobAnalysis.vue'
 import ResumePreview from './tabs/ResumePreview.vue'
@@ -75,6 +76,13 @@ function triggerBossSearch(keyword = '') {
 defineExpose({ setTab, triggerBossSearch })
 
 const activeTab = ref('intro')
+const tabBar = ref(null)
+
+watch(activeTab, () => {
+  tabBar.value?.querySelector('.tab-btn.active')?.scrollIntoView({
+    block: 'nearest', inline: 'nearest',
+  })
+}, { flush: 'post' })
 
 const tabs = computed(() => [
   { key: 'intro', label: '介绍', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>', badge: '' },
@@ -99,22 +107,19 @@ const tabs = computed(() => [
 /* ── Tab Bar ── */
 .tab-bar {
   display: flex;
-  gap: 2px;
+  gap: 4px;
   border-bottom: 1px solid var(--border);
-  padding: 10px 16px;
+  padding: 8px 12px;
   flex-shrink: 0;
   overflow-x: auto;
-  background: rgba(255, 255, 255, 0.96);
-  scrollbar-width: none;
-}
-.tab-bar::-webkit-scrollbar {
-  display: none;
+  background: var(--bg-white);
 }
 .tab-btn {
-  padding: 7px 12px;
+  min-height: 44px;
+  padding: 6px 10px;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-light);
+  color: var(--text-secondary);
   font-size: 13px;
   white-space: nowrap;
   display: flex;
@@ -129,9 +134,9 @@ const tabs = computed(() => [
   background: var(--surface);
 }
 .tab-btn.active {
-  color: var(--primary);
+  color: var(--primary-hover);
   background: var(--primary-subtle);
-  font-weight: 500;
+  font-weight: 650;
 }
 .tab-icon {
   display: flex;
@@ -154,8 +159,9 @@ const tabs = computed(() => [
 /* ── Tab Content ── */
 .tab-content {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 20px 24px;
+  padding: clamp(12px, 2vw, 24px);
   background: var(--surface);
 }
 

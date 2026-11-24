@@ -1,7 +1,9 @@
 """ Interview Assistant后端入口。"""
 
-from pathlib import Path
+import logging
 import sys
+from contextlib import AsyncExitStack, asynccontextmanager
+from pathlib import Path
 
 # 确保 backend 目录在 sys.path（绝对路径），使 `from config_loader import ...`、
 # `from api.chat import ...` 等内部导入无论从哪个工作目录/入口启动都能成功。
@@ -15,23 +17,102 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config_loader import get_fastapi_config
 from log import setup_logging, get_logger
+from observability import setup_observability
 from api.chat import router as chat_router
 from api.resume import router as resume_router
 from api.export import router as export_router
 from api.interview import router as interview_router
-from storage.mysql_client import get_mysql_pool
-from storage.redis_client import get_redis_client
+from storage.mysql_client import close_mysql_pool, get_mysql_pool
+from storage.redis_client import close_redis_client, get_redis_client
+
+# ── 控制台输出落盘 ──
+# boss 自动化模块（boss_automation / boss_firefox / manager）整块用 print() 输出，不接
+# logging，所以那些 🚀 投递 / 📡 JS返回 / ⚠️ 风控冷却 日志只存在于启动后端的终端里，
+# 一闪而过、无法回查 —— 排查"界面显示已投递、BOSS 上其实没投"这类问题时完全抓瞎。
+# 这里把 stdout/stderr 各复制一份到 log/boss.log。
+#
+# 必须装在模块级：uvicorn debug(reload) 模式下真正跑业务的是 import main:app 的子进程，
+# 它的 __name__ 不是 "__main__"，装在 `if __name__ == "__main__"` 里等于没装。
+_CONSOLE_LOG_INSTALLED = False
+_CONSOLE_LOG_MAX_BYTES = 20 * 1024 * 1024
+
+
+class _TeeStream:
+    """把写入同时送到原始终端和日志文件。"""
+
+    def __init__(self, original, log_file):
+        self._original = original
+        self._log_file = log_file
+
+    def write(self, data):
+        try:
+            self._original.write(data)
+        except Exception:
+            pass
+        try:
+            self._log_file.write(data)
+            self._log_file.flush()  # 长驻进程：不 flush 就没法边跑边看
+        except Exception:
+            pass
+        return len(data)
+
+    def flush(self):
+        for stream in (self._original, self._log_file):
+            try:
+                stream.flush()
+            except Exception:
+                pass
+
+    def __getattr__(self, name):
+        # isatty / encoding / fileno 等委托给原 stream，别破坏依赖它们的库
+        return getattr(self._original, name)
+
+
+def setup_console_log() -> None:
+    """把本进程的控制台输出同时写入 log/boss.log（幂等）。"""
+    global _CONSOLE_LOG_INSTALLED
+    if _CONSOLE_LOG_INSTALLED:
+        return
+    _CONSOLE_LOG_INSTALLED = True
+    try:
+        log_dir = _BACKEND_DIR / "log"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / "boss.log"
+        # 纯控制台转储，不做行级轮转；启动时超限就整体归档一份
+        if log_path.exists() and log_path.stat().st_size > _CONSOLE_LOG_MAX_BYTES:
+            log_path.replace(log_dir / "boss.log.1")
+        handle = open(log_path, "a", encoding="utf-8", errors="replace")
+        sys.stdout = _TeeStream(sys.stdout, handle)
+        sys.stderr = _TeeStream(sys.stderr, handle)
+    except Exception:
+        pass  # 落盘失败不能影响服务启动
+
 
 # 初始化日志
-setup_logging()
+setup_logging(logging.INFO)
+setup_console_log()
 logger = get_logger("app")
 BACKEND_DIR = _BACKEND_DIR
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    async with AsyncExitStack() as resources:
+        resources.push_async_callback(close_mysql_pool)
+        resources.push_async_callback(close_redis_client)
+        await _check_required_services()
+        yield
+
 
 app = FastAPI(
     title="Interview Assistant",
     description="多 Agent 求职辅助系统",
     version="0.1.0",
+    lifespan=lifespan,
 )
+
+if __name__ != "__main__":
+    setup_observability(app)
 
 # CORS
 app.add_middleware(
@@ -50,8 +131,12 @@ app.include_router(interview_router)
 
 # BOSS 直聘自动化路由（可选模块，Playwright 未安装时跳过）
 try:
-    from api.boss import router as boss_router
+    from api.boss import browser_wedged_handler, router as boss_router
+    from boss.manager import BrowserWedgedError
+
     app.include_router(boss_router)
+    # 浏览器线程卡死要回 503 + 处置办法，而不是被兜成没有信息量的 500
+    app.add_exception_handler(BrowserWedgedError, browser_wedged_handler)
     logger.info("BOSS automation router registered")
 except ImportError as exc:
     logger.info("BOSS automation module skipped (dependency missing): %s", exc)
@@ -144,12 +229,6 @@ if __name__ == "__main__":
         pass  # uvicorn 升级导致内部变化时静默降级，不影响启动
 
     cfg = get_fastapi_config()
-    try:
-        asyncio.run(_check_required_services())
-    except Exception as exc:
-        logger.critical("Startup aborted because dependency check failed: %s", exc, exc_info=True)
-        sys.exit(1)
-
     logger.info("Starting Interview Assistant server on %s:%s", cfg["host"], cfg["port"])
     is_debug = cfg.get("debug", False)
     workers = cfg.get("workers", 2)
